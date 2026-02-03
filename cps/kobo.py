@@ -1161,6 +1161,8 @@ def HandleInitRequest():
                                                                width="{width}",
                                                                height="{height}",
                                                                isGreyscale='false'))
+        # Set reading services host to enable local annotation storage
+        kobo_resources["reading_services_host"] = calibre_web_url
     else:
         kobo_resources["image_host"] = url_for("web.index", _external=True).strip("/")
         kobo_resources["image_url_quality_template"] = unquote(url_for("kobo.HandleCoverImageRequest",
@@ -1178,6 +1180,8 @@ def HandleInitRequest():
                                                                height="{height}",
                                                                isGreyscale='false',
                                                                _external=True))
+        # Set reading services host to enable local annotation storage
+        kobo_resources["reading_services_host"] = url_for("web.index", _external=True).strip("/")
 
     response = make_response(jsonify({"Resources": kobo_resources}))
     response.headers["x-kobo-apitoken"] = "e30="

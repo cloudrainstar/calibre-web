@@ -488,6 +488,40 @@ class KoboStatistics(Base):
     spent_reading_minutes = Column(Integer)
 
 
+# Stores Kobo annotations (highlights and notes)
+class KoboAnnotation(Base):
+    __tablename__ = 'kobo_annotation'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('user.id'))
+    book_id = Column(Integer)
+    annotation_id = Column(String)  # Kobo's unique annotation ID
+    annotation_type = Column(String)  # "highlight" or "note"
+    highlighted_text = Column(String)
+    note_text = Column(String)
+    highlight_color = Column(String)
+    location_value = Column(String)
+    location_type = Column(String)
+    location_source = Column(String)
+    chapter_filename = Column(String)
+    chapter_progress = Column(Float)
+    progress_percent = Column(Float)
+    created = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+# Tracks annotation sync status to prevent duplicates
+class KoboAnnotationSync(Base):
+    __tablename__ = 'kobo_annotation_sync'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('user.id'))
+    annotation_id = Column(String, unique=True)  # Unique per annotation
+    book_id = Column(Integer)
+    last_synced = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    synced = Column(Boolean, default=True)
+
+
 # Updates the last_modified timestamp in the KoboReadingState table if any of its children tables are modified.
 @event.listens_for(Session, 'before_flush')
 def receive_before_flush(session, flush_context, instances):
@@ -572,6 +606,10 @@ def add_missing_tables(engine, _session):
         ArchivedBook.__table__.create(bind=engine)
     if not engine.dialect.has_table(engine.connect(), "thumbnail"):
         Thumbnail.__table__.create(bind=engine)
+    if not engine.dialect.has_table(engine.connect(), "kobo_annotation"):
+        KoboAnnotation.__table__.create(bind=engine)
+    if not engine.dialect.has_table(engine.connect(), "kobo_annotation_sync"):
+        KoboAnnotationSync.__table__.create(bind=engine)
 
 
 # migrate all settings missing in registration table

@@ -420,6 +420,7 @@ class ReadBook(Base):
     last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_time_started_reading = Column(DateTime, nullable=True)
     times_started_reading = Column(Integer, default=0, nullable=False)
+    last_time_finished = Column(DateTime, nullable=True)
 
 
 class Bookmark(Base):

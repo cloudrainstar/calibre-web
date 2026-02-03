@@ -863,16 +863,19 @@ def HandleStateRequest(book_uuid):
                         and new_book_read_status != book_read.read_status:
                     book_read.times_started_reading += 1
                     book_read.last_time_started_reading = datetime.now(timezone.utc)
-                book_read.read_status = new_book_read_status
                 
-                # Mark book as read in Calibre-Web when finished on Kobo device
-                if new_book_read_status == ub.ReadBook.STATUS_FINISHED:
+                # Track when book is finished
+                if new_book_read_status == ub.ReadBook.STATUS_FINISHED \
+                        and new_book_read_status != book_read.read_status:
+                    book_read.last_time_finished = datetime.now(timezone.utc)
+                    # Mark book as read in Calibre-Web when finished on Kobo device
                     try:
                         helper.edit_book_read_status(book.id, True)
                         log.debug(f"Marked book {book.id} as read (finished on Kobo)")
                     except Exception as e:
                         log.error(f"Failed to mark book {book.id} as read: {e}")
                 
+                book_read.read_status = new_book_read_status
                 update_results_response["StatusInfoResult"] = {"Result": "Success"}
         except (KeyError, TypeError, ValueError, StatementError):
             log.debug("Received malformed v1/library/<book_uuid>/state request.")
@@ -943,6 +946,8 @@ def get_status_info_response(book_read):
     }
     if book_read.last_time_started_reading:
         resp["LastTimeStartedReading"] = convert_to_kobo_timestamp_string(book_read.last_time_started_reading)
+    if book_read.last_time_finished:
+        resp["LastTimeFinished"] = convert_to_kobo_timestamp_string(book_read.last_time_finished)
     return resp
 
 
@@ -1171,9 +1176,11 @@ def HandleInitRequest():
                                                                height="{height}",
                                                                isGreyscale='false'))
         # Set reading services host to enable local annotation storage
-        kobo_resources["reading_services_host"] = calibre_web_url + url_for("readingservices.handle_annotations",
-                                                                              auth_token=kobo_auth.get_auth_token(),
-                                                                              entitlement_id="").rstrip("/api/v3/content//annotations")
+        # kobo_resources["reading_services_host"] = calibre_web_url + url_for("readingservices.handle_annotations",
+        #                                                                       auth_token=kobo_auth.get_auth_token(),
+        #                                                                       entitlement_id="").rstrip("/api/v3/content//annotations")
+        # Temp: using mitm to capture some request and response data
+        kobo_resources["reading_services_host"] = "https://kobors.kenliao.info"
     else:
         kobo_resources["image_host"] = url_for("web.index", _external=True).strip("/")
         kobo_resources["image_url_quality_template"] = unquote(url_for("kobo.HandleCoverImageRequest",
@@ -1192,10 +1199,12 @@ def HandleInitRequest():
                                                                isGreyscale='false',
                                                                _external=True))
         # Set reading services host to enable local annotation storage
-        kobo_resources["reading_services_host"] = url_for("readingservices.handle_annotations",
-                                                           auth_token=kobo_auth.get_auth_token(),
-                                                           entitlement_id="",
-                                                           _external=True).rstrip("/api/v3/content//annotations")
+        # kobo_resources["reading_services_host"] = url_for("readingservices.handle_annotations",
+        #                                                    auth_token=kobo_auth.get_auth_token(),
+        #                                                    entitlement_id="",
+        #                                                    _external=True).rstrip("/api/v3/content//annotations")
+        # Temp: using mitm to capture some request and response data
+        kobo_resources["reading_services_host"] = "https://kobors.kenliao.info"
 
     response = make_response(jsonify({"Resources": kobo_resources}))
     response.headers["x-kobo-apitoken"] = "e30="

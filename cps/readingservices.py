@@ -266,17 +266,35 @@ def handle_annotations(entitlement_id):
 
     if request.method == "GET":
         # Return annotations from local database
-        annotations = ub.session.query(ub.KoboAnnotation).filter(
+        # Handle pagination parameters
+        limit = request.args.get('limit', type=int, default=100)
+        offset = request.args.get('offset', type=int, default=0)
+        
+        # Query with pagination
+        query = ub.session.query(ub.KoboAnnotation).filter(
             ub.KoboAnnotation.book_id == book.id,
             ub.KoboAnnotation.user_id == current_user.id
-        ).all()
+        ).order_by(ub.KoboAnnotation.last_modified.desc())
+        
+        # Get total count to check if more pages exist
+        total_count = query.count()
+        
+        # Apply pagination
+        annotations = query.offset(offset).limit(limit).all()
         
         annotation_list = []
         for ann in annotations:
             if ann.annotation_data:
                 annotation_list.append(ann.annotation_data)
         
-        return jsonify({"annotations": annotation_list, "nextPageOffsetToken": None})
+        # Calculate next page token if there are more results
+        next_offset = offset + limit
+        next_page_token = str(next_offset) if next_offset < total_count else None
+        
+        return jsonify({
+            "annotations": annotation_list, 
+            "nextPageOffsetToken": next_page_token
+        })
     elif request.method == "PATCH":
         try:
             data = request.get_json()

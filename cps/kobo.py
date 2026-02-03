@@ -108,95 +108,23 @@ def make_request_to_kobo_store(sync_token=None):
 
 
 def redirect_or_proxy_request(auth=False):
-    """
-    Proxy request to Kobo store and capture request/response for debugging/emulation.
-    
-    Previously this would redirect GET requests, but now always proxies to enable
-    request/response capture for future emulation capabilities.
-    """
     if config.config_kobo_proxy:
         try:
-            kobo_url = get_store_url_for_current_request()
-            request_body = request.get_data()
-            
-            # Capture request data for debugging/emulation
-            log.debug("=" * 80)
-            log.debug("KOBO STORE API - REQUEST CAPTURE")
-            log.debug("=" * 80)
-            log.debug(f"Method: {request.method}")
-            log.debug(f"Path: {request.path}")
-            log.debug(f"Full URL: {kobo_url}")
-            log.debug(f"Query String: {request.query_string.decode('utf-8') if request.query_string else 'None'}")
-            
-            # Log request headers (redact sensitive info)
-            log.debug("Request Headers:")
-            for header_name, header_value in request.headers.items():
-                if header_name.lower() in ['authorization', 'cookie', 'x-kobo-userkey']:
-                    log.debug(f"  {header_name}: [REDACTED]")
-                else:
-                    log.debug(f"  {header_name}: {header_value}")
-            
-            # Log request body
-            if request_body:
-                try:
-                    request_json = json.loads(request_body)
-                    log.debug("Request Body (JSON):")
-                    log.debug(json.dumps(request_json, indent=2))
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    log.debug(f"Request Body (Raw, {len(request_body)} bytes):")
-                    log.debug(request_body[:500])  # First 500 bytes
+            if request.method == "GET":
+                alfa = redirect(get_store_url_for_current_request(), 307)
+                return alfa
             else:
-                log.debug("Request Body: (empty)")
-            
-            # Make the proxy request (always proxy, no redirect)
-            store_response = make_request_to_kobo_store()
-            
-            # Capture response data for debugging/emulation
-            log.debug("-" * 80)
-            log.debug("KOBO STORE API - RESPONSE CAPTURE")
-            log.debug("-" * 80)
-            log.debug(f"Status Code: {store_response.status_code}")
-            log.debug(f"Status Text: {store_response.reason}")
-            
-            # Log response headers
-            log.debug("Response Headers:")
-            for header_name, header_value in store_response.headers.items():
-                if header_name.lower() in ['set-cookie']:
-                    log.debug(f"  {header_name}: [REDACTED]")
-                else:
-                    log.debug(f"  {header_name}: {header_value}")
-            
-            # Log response body
-            response_content = store_response.content
-            if response_content:
-                content_type = store_response.headers.get('Content-Type', '')
-                try:
-                    if 'application/json' in content_type:
-                        response_json = json.loads(response_content)
-                        log.debug("Response Body (JSON):")
-                        log.debug(json.dumps(response_json, indent=2))
-                    else:
-                        log.debug(f"Response Body ({content_type}, {len(response_content)} bytes):")
-                        # For non-JSON, just log size and first few bytes
-                        if len(response_content) < 500:
-                            log.debug(response_content[:500])
-                        else:
-                            log.debug(f"[Large response, {len(response_content)} bytes - not displaying]")
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    log.debug(f"Response Body (Raw, {len(response_content)} bytes):")
-                    log.debug(response_content[:500])
-            else:
-                log.debug("Response Body: (empty)")
-            
-            log.debug("=" * 80)
+                # The Kobo device turns other request types into GET requests on redirects,
+                # so we instead proxy to the Kobo store ourselves.
+                store_response = make_request_to_kobo_store()
 
-            response_headers = store_response.headers
-            for header_key in CONNECTION_SPECIFIC_HEADERS:
-                response_headers.pop(header_key, default=None)
+                response_headers = store_response.headers
+                for header_key in CONNECTION_SPECIFIC_HEADERS:
+                    response_headers.pop(header_key, default=None)
 
-            return make_response(
-                store_response.content, store_response.status_code, response_headers.items()
-            )
+                return make_response(
+                    store_response.content, store_response.status_code, response_headers.items()
+                )
         except Exception as e:
             log.error("Failed to receive or parse response from Kobo's endpoint: {}".format(e))
             if auth:

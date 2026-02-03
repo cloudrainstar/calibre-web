@@ -54,6 +54,54 @@ from .services import SyncToken as SyncToken
 from .web import download_required
 from .kobo_auth import requires_kobo_auth, get_auth_token
 
+
+def store_device_id():
+    """
+    Store or update the device ID from X-Kobo-Deviceid header.
+    Associates device ID with the current user's auth token.
+    A device can only belong to one user, but a user can have multiple devices.
+    """
+    device_id = request.headers.get('X-Kobo-Deviceid')
+    device_model = request.headers.get('X-Kobo-Devicemodel')
+    
+    if not device_id:
+        return  # No device ID in request
+    
+    if not current_user.is_authenticated:
+        return  # No authenticated user
+    
+    auth_token = get_auth_token()
+    
+    try:
+        # Check if device already exists
+        existing_device = ub.session.query(ub.KoboDevice).filter(
+            ub.KoboDevice.device_id == device_id
+        ).first()
+        
+        if existing_device:
+            # Update existing device record
+            existing_device.auth_token = auth_token
+            existing_device.user_id = current_user.id
+            existing_device.last_seen = datetime.now(timezone.utc)
+            if device_model:
+                existing_device.device_name = device_model
+            log.debug(f"Updated device {device_id} for user {current_user.name}")
+        else:
+            # Create new device record
+            new_device = ub.KoboDevice(
+                device_id=device_id,
+                auth_token=auth_token,
+                user_id=current_user.id,
+                device_name=device_model
+            )
+            ub.session.add(new_device)
+            log.info(f"Registered new device {device_id} for user {current_user.name}")
+        
+        ub.session_commit()
+    except Exception as e:
+        log.error(f"Failed to store device ID: {e}")
+        ub.session.rollback()
+
 KOBO_FORMATS = {"KEPUB": ["KEPUB"], "EPUB": ["EPUB3", "EPUB"]}
 KOBO_STOREAPI_URL = "https://storeapi.kobo.com"
 KOBO_IMAGEHOST_URL = "https://cdn.kobo.com/book-images"
@@ -144,6 +192,9 @@ def convert_to_kobo_timestamp_string(timestamp):
 @requires_kobo_auth
 # @download_required
 def HandleSyncRequest():
+    # Store device ID for this request
+    store_device_id()
+    
     if not current_user.role_download():
         log.info("Users need download permissions for syncing library to Kobo reader")
         return abort(403)
@@ -1134,6 +1185,9 @@ def HandleAuthRequest():
 @requires_kobo_auth
 def HandleInitRequest():
     log.info('Init')
+    
+    # Store device ID for this request
+    store_device_id()
 
     kobo_resources = None
     if config.config_kobo_proxy:
@@ -1176,9 +1230,8 @@ def HandleInitRequest():
                                                                height="{height}",
                                                                isGreyscale='false'))
         # Set reading services host to enable local annotation storage
-        kobo_resources["reading_services_host"] = calibre_web_url + url_for("readingservices.handle_annotations",
-                                                                              auth_token=kobo_auth.get_auth_token(),
-                                                                              entitlement_id="").rstrip("/api/v3/content//annotations")
+        # Only use base URL - device ID in header will identify the user
+        kobo_resources["reading_services_host"] = calibre_web_url
     else:
         kobo_resources["image_host"] = url_for("web.index", _external=True).strip("/")
         kobo_resources["image_url_quality_template"] = unquote(url_for("kobo.HandleCoverImageRequest",
@@ -1197,10 +1250,8 @@ def HandleInitRequest():
                                                                isGreyscale='false',
                                                                _external=True))
         # Set reading services host to enable local annotation storage
-        kobo_resources["reading_services_host"] = url_for("readingservices.handle_annotations",
-                                                           auth_token=kobo_auth.get_auth_token(),
-                                                           entitlement_id="",
-                                                           _external=True).rstrip("/api/v3/content//annotations")
+        # Only use base URL - device ID in header will identify the user
+        kobo_resources["reading_services_host"] = url_for("web.index", _external=True).strip("/")
 
     response = make_response(jsonify({"Resources": kobo_resources}))
     response.headers["x-kobo-apitoken"] = "e30="

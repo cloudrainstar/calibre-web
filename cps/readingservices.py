@@ -22,6 +22,7 @@ Reading Services API for Kobo Annotations/Highlights
 Handles annotation sync from Kobo devices
 
 These routes are at the root level: /api/v3/..., /api/UserStorage/...
+Authentication is done via X-Kobo-Deviceid header instead of auth token in URL.
 """
 
 import json
@@ -33,15 +34,15 @@ from werkzeug.datastructures import Headers
 import requests
 
 from . import logger, calibre_db, db, config, ub, csrf, kobo_auth
-from .cw_login import current_user
+from .cw_login import current_user, login_user
 
 log = logger.create()
 
-# Create blueprint to handle the relevant reading services API routes
-# Uses auth token in URL like main Kobo blueprint for per-user authentication
-readingservices = Blueprint("readingservices", __name__, url_prefix="/readingservices/<auth_token>")
-kobo_auth.disable_failed_auth_redirect_for_blueprint(readingservices)
-kobo_auth.register_url_value_preprocessor(readingservices)
+# Create blueprints to handle the relevant reading services API routes
+# No auth token in URL - authentication done via X-Kobo-Deviceid header
+# Split into two blueprints to avoid route overlaps
+readingservices_api_v3 = Blueprint("readingservices_api_v3", __name__, url_prefix="/api/v3")
+readingservices_userstorage = Blueprint("readingservices_userstorage", __name__, url_prefix="/api/UserStorage")
 
 KOBO_READING_SERVICES_URL = "https://readingservices.kobo.com"
 
@@ -110,10 +111,52 @@ def proxy_to_kobo_reading_services():
         return make_response(jsonify({"error": "Internal server error"}), 500)
 
 
+def get_user_from_device_id():
+    """
+    Get user from X-Kobo-Deviceid header by looking up the device in the database.
+    Returns the user object if found and authenticated, None otherwise.
+    """
+    device_id = request.headers.get('X-Kobo-Deviceid')
+    
+    if not device_id:
+        log.debug("No X-Kobo-Deviceid header found")
+        return None
+    
+    try:
+        # Look up device in database
+        device = ub.session.query(ub.KoboDevice).filter(
+            ub.KoboDevice.device_id == device_id
+        ).first()
+        
+        if not device:
+            log.debug(f"Device {device_id} not found in database")
+            return None
+        
+        # Get the user associated with this device
+        user = ub.session.query(ub.User).filter(
+            ub.User.id == device.user_id
+        ).first()
+        
+        if not user:
+            log.warning(f"User not found for device {device_id}")
+            return None
+        
+        # Update last seen timestamp
+        device.last_seen = datetime.now(timezone.utc)
+        ub.session_commit()
+        
+        log.debug(f"Found user {user.name} for device {device_id}")
+        return user
+        
+    except Exception as e:
+        log.error(f"Error looking up device {device_id}: {e}")
+        return None
+
+
 def requires_reading_services_auth(f):
     """
     Auth decorator for Reading Services endpoints.
-    Checks if Kobo sync is enabled and user is authenticated.
+    Uses X-Kobo-Deviceid header to identify the user instead of auth token in URL.
     If not enabled or not authenticated, proxies the request to Kobo without processing.
     """
     @wraps(f)
@@ -123,12 +166,17 @@ def requires_reading_services_auth(f):
             log.debug("Kobo sync disabled, proxying to Kobo")
             return proxy_to_kobo_reading_services()
         
-        # Check if user is authenticated (cookie from Kobo sync)
-        if current_user.is_authenticated:
+        # Try to authenticate via device ID
+        user = get_user_from_device_id()
+        
+        if user:
+            # Log in the user for this request context
+            login_user(user)
+            log.debug(f"Authenticated user {user.name} via device ID")
             return f(*args, **kwargs)
         else:
-            # User not authenticated - just proxy to Kobo
-            log.debug("Reading services request without auth, proxying to Kobo")
+            # Device not found or user not authenticated - proxy to Kobo
+            log.debug("Reading services request without valid device auth, proxying to Kobo")
             return proxy_to_kobo_reading_services()
     return decorated_function
 
@@ -165,8 +213,9 @@ def log_annotation_data(entitlement_id, method, data=None):
 # Helper functions for file management
 def get_annotation_attachment_dir(entitlement_id):
     """Get the directory path for storing annotation attachments"""
-    user_token = kobo_auth.get_auth_token()
-    attachment_dir = os.path.join(config.config_calibre_dir, "kobo_annotations", user_token, entitlement_id)
+    # Use user ID instead of auth token for directory structure
+    user_dir = str(current_user.id)
+    attachment_dir = os.path.join(config.config_calibre_dir, "kobo_annotations", user_dir, entitlement_id)
     os.makedirs(attachment_dir, exist_ok=True)
     return attachment_dir
 
@@ -250,7 +299,7 @@ def process_annotation_for_sync(annotation, book, existing_syncs=None):
 
 
 @csrf.exempt
-@readingservices.route("/api/v3/content/<entitlement_id>/annotations", methods=["GET", "PATCH"])
+@readingservices_api_v3.route("/content/<entitlement_id>/annotations", methods=["GET", "PATCH"])
 @requires_reading_services_auth
 def handle_annotations(entitlement_id):
     """
@@ -360,7 +409,7 @@ def handle_annotations(entitlement_id):
 
 
 @csrf.exempt
-@readingservices.route("/api/v3/content/<entitlement_id>/annotations/<annotation_id>/attachments", methods=["POST", "GET"])
+@readingservices_api_v3.route("/content/<entitlement_id>/annotations/<annotation_id>/attachments", methods=["POST", "GET"])
 @requires_reading_services_auth
 def handle_annotation_attachments(entitlement_id, annotation_id):
     """
@@ -418,7 +467,7 @@ def handle_annotation_attachments(entitlement_id, annotation_id):
 
 
 @csrf.exempt
-@readingservices.route("/api/v3/content/checkforchanges", methods=["POST"])
+@readingservices_api_v3.route("/content/checkforchanges", methods=["POST"])
 @requires_reading_services_auth
 def handle_check_for_changes():
     """
@@ -461,7 +510,7 @@ def handle_check_for_changes():
 
 
 @csrf.exempt
-@readingservices.route("/api/UserStorage/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@readingservices_userstorage.route("/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 @requires_reading_services_auth
 def handle_user_storage(subpath):
     """
@@ -472,7 +521,7 @@ def handle_user_storage(subpath):
 
 
 @csrf.exempt
-@readingservices.route("/api/v3/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@readingservices_api_v3.route("/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 @requires_reading_services_auth
 def handle_unknown_reading_service_request(subpath):
     """

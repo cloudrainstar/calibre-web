@@ -515,6 +515,20 @@ class KoboAnnotationSync(Base):
     synced = Column(Boolean, default=True)
 
 
+# Stores Kobo device IDs associated with user auth tokens
+# A device can only belong to one user, but a user can have multiple devices
+class KoboDevice(Base):
+    __tablename__ = 'kobo_device'
+
+    id = Column(Integer, primary_key=True)
+    device_id = Column(String, unique=True, nullable=False)  # X-Kobo-Deviceid header value
+    auth_token = Column(String, nullable=False)  # Kobo auth token for this user
+    user_id = Column(Integer, ForeignKey('user.id'))
+    device_name = Column(String)  # Optional: device model name (e.g., "Kobo Libra Colour")
+    last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 # Updates the last_modified timestamp in the KoboReadingState table if any of its children tables are modified.
 @event.listens_for(Session, 'before_flush')
 def receive_before_flush(session, flush_context, instances):
@@ -603,6 +617,8 @@ def add_missing_tables(engine, _session):
         KoboAnnotation.__table__.create(bind=engine)
     if not engine.dialect.has_table(engine.connect(), "kobo_annotation_sync"):
         KoboAnnotationSync.__table__.create(bind=engine)
+    if not engine.dialect.has_table(engine.connect(), "kobo_device"):
+        KoboDevice.__table__.create(bind=engine)
 
 
 # migrate all settings missing in registration table

@@ -55,13 +55,53 @@ CONNECTION_SPECIFIC_HEADERS = [
 
 
 def proxy_to_kobo_reading_services():
-    """Proxy the request to Kobo's reading services API."""
+    """
+    Proxy the request to Kobo's reading services API.
+    
+    This function captures both request and response data for debugging and potential
+    emulation. The captured data can be used to:
+    1. Understand Kobo's API structure
+    2. Build offline/cached responses for books in local database
+    3. Debug annotation sync issues
+    
+    To enable detailed capture logging, set log level to DEBUG in Calibre-Web settings.
+    """
     try:
         kobo_url = KOBO_READING_SERVICES_URL + request.path
         if request.query_string:
             kobo_url += "?" + request.query_string.decode('utf-8')
         
         log.debug(f"Proxying {request.method} to Kobo Reading Services: {kobo_url}")
+        
+        # Capture request data for emulation
+        request_body = request.get_data()
+        log.debug("=" * 80)
+        log.debug("KOBO READING SERVICES - REQUEST CAPTURE")
+        log.debug("=" * 80)
+        log.debug(f"Method: {request.method}")
+        log.debug(f"Path: {request.path}")
+        log.debug(f"Full URL: {kobo_url}")
+        log.debug(f"Query String: {request.query_string.decode('utf-8') if request.query_string else 'None'}")
+        
+        # Log request headers (redact sensitive info)
+        log.debug("Request Headers:")
+        for header_name, header_value in request.headers.items():
+            if header_name.lower() in ['authorization', 'cookie', 'x-kobo-userkey']:
+                log.debug(f"  {header_name}: [REDACTED]")
+            else:
+                log.debug(f"  {header_name}: {header_value}")
+        
+        # Log request body
+        if request_body:
+            try:
+                request_json = json.loads(request_body)
+                log.debug("Request Body (JSON):")
+                log.debug(json.dumps(request_json, indent=2))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                log.debug(f"Request Body (Raw, {len(request_body)} bytes):")
+                log.debug(request_body[:500])  # First 500 bytes
+        else:
+            log.debug("Request Body: (empty)")
         
         # Forward headers (including Authorization, x-kobo-userkey, etc.)
         outgoing_headers = Headers(request.headers)
@@ -73,10 +113,45 @@ def proxy_to_kobo_reading_services():
             method=request.method,
             url=kobo_url,
             headers=outgoing_headers,
-            data=request.get_data(),
+            data=request_body,
             allow_redirects=False,
             timeout=(2, 10)
         )
+        
+        # Capture response data for emulation
+        log.debug("-" * 80)
+        log.debug("KOBO READING SERVICES - RESPONSE CAPTURE")
+        log.debug("-" * 80)
+        log.debug(f"Status Code: {readingservices_response.status_code}")
+        log.debug(f"Status Text: {readingservices_response.reason}")
+        
+        # Log response headers
+        log.debug("Response Headers:")
+        for header_name, header_value in readingservices_response.headers.items():
+            if header_name.lower() in ['set-cookie']:
+                log.debug(f"  {header_name}: [REDACTED]")
+            else:
+                log.debug(f"  {header_name}: {header_value}")
+        
+        # Log response body
+        response_content = readingservices_response.content
+        if response_content:
+            content_type = readingservices_response.headers.get('Content-Type', '')
+            try:
+                if 'application/json' in content_type:
+                    response_json = json.loads(response_content)
+                    log.debug("Response Body (JSON):")
+                    log.debug(json.dumps(response_json, indent=2))
+                else:
+                    log.debug(f"Response Body ({content_type}, {len(response_content)} bytes):")
+                    log.debug(response_content[:500])  # First 500 bytes
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                log.debug(f"Response Body (Raw, {len(response_content)} bytes):")
+                log.debug(response_content[:500])
+        else:
+            log.debug("Response Body: (empty)")
+        
+        log.debug("=" * 80)
         
         if readingservices_response.status_code >= 400:
             log.warning(f"Kobo Reading Services error {readingservices_response.status_code}")
@@ -104,6 +179,57 @@ def proxy_to_kobo_reading_services():
         import traceback
         log.error(traceback.format_exc())
         return make_response(jsonify({"error": "Internal server error"}), 500)
+
+
+def can_emulate_kobo_response(entitlement_id=None):
+    """
+    Check if we can serve an emulated/cached response instead of proxying to Kobo.
+    
+    This is a placeholder for future functionality where responses can be:
+    - Served from cache for performance
+    - Generated locally for offline operation
+    - Customized based on local book database
+    
+    Args:
+        entitlement_id: Book UUID to check if we have local data
+    
+    Returns:
+        bool: True if we can emulate the response locally
+        
+    TODO: Implement logic to:
+    1. Check if book exists in local database
+    2. Verify we have cached response data
+    3. Check if response is still valid/fresh
+    """
+    # For now, always proxy to Kobo
+    # Future implementation could check:
+    # - if book.uuid == entitlement_id exists in calibre_db
+    # - if we have cached Kobo response data
+    # - if user prefers offline mode
+    return False
+
+
+def emulate_kobo_response(request_type, entitlement_id=None):
+    """
+    Generate an emulated Kobo Reading Services response from local data.
+    
+    This is a placeholder for future functionality.
+    
+    Args:
+        request_type: Type of request (e.g., 'annotations', 'metadata')
+        entitlement_id: Book UUID
+        
+    Returns:
+        Flask response object with emulated data
+        
+    TODO: Implement based on captured request/response patterns
+    """
+    # Placeholder - would build response from local database
+    # Example for annotations:
+    # - Query kobo_annotation table for this book
+    # - Format as Kobo expects
+    # - Return with appropriate headers
+    return make_response(jsonify({"error": "Emulation not yet implemented"}), 501)
 
 
 def requires_reading_services_auth(f):
@@ -430,7 +556,14 @@ def handle_annotations(entitlement_id):
     Handle annotation requests for a specific book.
     GET: Retrieve all annotations for a book
     PATCH: Update/create annotations
+    
+    Future enhancement: Check if book exists locally and serve emulated response
+    instead of always proxying to Kobo.
     """
+    # TODO: Future emulation support
+    # if request.method == "GET" and can_emulate_kobo_response(entitlement_id):
+    #     return emulate_kobo_response('annotations', entitlement_id)
+    
     # GET requests are proxied directly to Kobo at the end of the function
     # We only intercept PATCH requests to sync changes to local database
     if request.method == "PATCH":

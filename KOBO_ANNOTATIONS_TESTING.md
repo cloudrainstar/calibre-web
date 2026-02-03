@@ -194,6 +194,51 @@ FROM kobo_annotation
 WHERE user_id = YOUR_USER_ID;
 ```
 
+## Capturing Request/Response for Emulation
+
+The reading services proxy captures all request and response data when log level is set to DEBUG. This allows you to:
+
+1. **Understand Kobo's API structure** for potential offline operation
+2. **Build cached/emulated responses** for books in your database
+3. **Debug annotation sync issues**
+
+### Enable Debug Logging
+
+1. Go to Admin > Basic Configuration > Logging
+2. Set "Log Level" to "Debug"
+3. Save changes
+
+### View Captured Data
+
+Check your Calibre-Web log file for entries like:
+
+```
+===============================================================================
+KOBO READING SERVICES - REQUEST CAPTURE
+===============================================================================
+Method: PATCH
+Path: /api/v3/content/abc-123-def/annotations
+...
+Request Body (JSON):
+{
+  "updatedAnnotations": [...],
+  "deletedAnnotationIds": [...]
+}
+-------------------------------------------------------------------------------
+KOBO READING SERVICES - RESPONSE CAPTURE
+-------------------------------------------------------------------------------
+Status Code: 200
+Response Body (JSON):
+...
+===============================================================================
+```
+
+### Use Cases for Captured Data
+
+**Offline Mode**: Use captured responses to serve annotation requests without internet
+**Performance**: Cache common responses to reduce latency
+**Development**: Understand Kobo's exact API requirements for custom features
+
 ## Advanced: API Testing
 
 You can test the API directly using curl:

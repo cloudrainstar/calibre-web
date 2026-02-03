@@ -936,6 +936,15 @@ def HandleStateRequest(book_uuid):
                     book_read.times_started_reading += 1
                     book_read.last_time_started_reading = datetime.now(timezone.utc)
                 book_read.read_status = new_book_read_status
+                
+                # Mark book as read in Calibre-Web when finished on Kobo device
+                if new_book_read_status == ub.ReadBook.STATUS_FINISHED:
+                    try:
+                        helper.edit_book_read_status(book.id, True)
+                        log.debug(f"Marked book {book.id} as read (finished on Kobo)")
+                    except Exception as e:
+                        log.error(f"Failed to mark book {book.id} as read: {e}")
+                
                 update_results_response["StatusInfoResult"] = {"Result": "Success"}
         except (KeyError, TypeError, ValueError, StatementError):
             log.debug("Received malformed v1/library/<book_uuid>/state request.")

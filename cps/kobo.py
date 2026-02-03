@@ -1176,11 +1176,9 @@ def HandleInitRequest():
                                                                height="{height}",
                                                                isGreyscale='false'))
         # Set reading services host to enable local annotation storage
-        # kobo_resources["reading_services_host"] = calibre_web_url + url_for("readingservices.handle_annotations",
-        #                                                                       auth_token=kobo_auth.get_auth_token(),
-        #                                                                       entitlement_id="").rstrip("/api/v3/content//annotations")
-        # Temp: using mitm to capture some request and response data
-        kobo_resources["reading_services_host"] = "https://kobors.kenliao.info"
+        kobo_resources["reading_services_host"] = calibre_web_url + url_for("readingservices.handle_annotations",
+                                                                              auth_token=kobo_auth.get_auth_token(),
+                                                                              entitlement_id="").rstrip("/api/v3/content//annotations")
     else:
         kobo_resources["image_host"] = url_for("web.index", _external=True).strip("/")
         kobo_resources["image_url_quality_template"] = unquote(url_for("kobo.HandleCoverImageRequest",
@@ -1199,12 +1197,10 @@ def HandleInitRequest():
                                                                isGreyscale='false',
                                                                _external=True))
         # Set reading services host to enable local annotation storage
-        # kobo_resources["reading_services_host"] = url_for("readingservices.handle_annotations",
-        #                                                    auth_token=kobo_auth.get_auth_token(),
-        #                                                    entitlement_id="",
-        #                                                    _external=True).rstrip("/api/v3/content//annotations")
-        # Temp: using mitm to capture some request and response data
-        kobo_resources["reading_services_host"] = "https://kobors.kenliao.info"
+        kobo_resources["reading_services_host"] = url_for("readingservices.handle_annotations",
+                                                           auth_token=kobo_auth.get_auth_token(),
+                                                           entitlement_id="",
+                                                           _external=True).rstrip("/api/v3/content//annotations")
 
     response = make_response(jsonify({"Resources": kobo_resources}))
     response.headers["x-kobo-apitoken"] = "e30="

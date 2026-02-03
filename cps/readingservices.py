@@ -281,53 +281,53 @@ def handle_annotations(entitlement_id):
         try:
             data = request.get_json()
             log_annotation_data(entitlement_id, "PATCH", data)
-                
-                # Handle deleted annotations
-                if data and "deletedAnnotationIds" in data:
-                    deleted_ids = data["deletedAnnotationIds"]
-                    log.info(f"Processing {len(deleted_ids)} deleted annotation IDs")
-                    for annotation_id in deleted_ids:
-                        # Delete annotation record
-                        ub.session.query(ub.KoboAnnotation).filter(
-                            ub.KoboAnnotation.annotation_id == annotation_id,
-                            ub.KoboAnnotation.user_id == current_user.id
-                        ).delete()
-                        
-                        # Delete sync record
-                        ub.session.query(ub.KoboAnnotationSync).filter(
-                            ub.KoboAnnotationSync.annotation_id == annotation_id,
-                            ub.KoboAnnotationSync.user_id == current_user.id
-                        ).delete()
-                        
-                        log.info(f"Deleted annotation {annotation_id}")
+            
+            # Handle deleted annotations
+            if data and "deletedAnnotationIds" in data:
+                deleted_ids = data["deletedAnnotationIds"]
+                log.info(f"Processing {len(deleted_ids)} deleted annotation IDs")
+                for annotation_id in deleted_ids:
+                    # Delete annotation record
+                    ub.session.query(ub.KoboAnnotation).filter(
+                        ub.KoboAnnotation.annotation_id == annotation_id,
+                        ub.KoboAnnotation.user_id == current_user.id
+                    ).delete()
                     
-                    try:
-                        ub.session_commit()
-                    except Exception as e:
-                        log.error(f"Failed to delete annotations: {e}")
-                        ub.session.rollback()
+                    # Delete sync record
+                    ub.session.query(ub.KoboAnnotationSync).filter(
+                        ub.KoboAnnotationSync.annotation_id == annotation_id,
+                        ub.KoboAnnotationSync.user_id == current_user.id
+                    ).delete()
+                    
+                    log.info(f"Deleted annotation {annotation_id}")
                 
-                # Extract updated annotations
-                if data and "updatedAnnotations" in data:
-                    annotations = data['updatedAnnotations']
-                    log.info(f"Processing {len(annotations)} updated annotations")
-                
-                    # Batch load existing sync records to avoid N+1 queries
-                    existing_syncs = {}
-                    annotation_ids = [a.get('id') for a in annotations if a.get('id')]
-                    if annotation_ids:
-                        syncs = ub.session.query(ub.KoboAnnotationSync).filter(
-                            ub.KoboAnnotationSync.annotation_id.in_(annotation_ids),
-                            ub.KoboAnnotationSync.user_id == current_user.id
-                        ).all()
-                        existing_syncs = {s.annotation_id: s for s in syncs}
+                try:
+                    ub.session_commit()
+                except Exception as e:
+                    log.error(f"Failed to delete annotations: {e}")
+                    ub.session.rollback()
+            
+            # Extract updated annotations
+            if data and "updatedAnnotations" in data:
+                annotations = data['updatedAnnotations']
+                log.info(f"Processing {len(annotations)} updated annotations")
+            
+                # Batch load existing sync records to avoid N+1 queries
+                existing_syncs = {}
+                annotation_ids = [a.get('id') for a in annotations if a.get('id')]
+                if annotation_ids:
+                    syncs = ub.session.query(ub.KoboAnnotationSync).filter(
+                        ub.KoboAnnotationSync.annotation_id.in_(annotation_ids),
+                        ub.KoboAnnotationSync.user_id == current_user.id
+                    ).all()
+                    existing_syncs = {s.annotation_id: s for s in syncs}
 
-                    for annotation in annotations:
-                        process_annotation_for_sync(
-                            annotation=annotation, 
-                            book=book, 
-                            existing_syncs=existing_syncs
-                        )
+                for annotation in annotations:
+                    process_annotation_for_sync(
+                        annotation=annotation, 
+                        book=book, 
+                        existing_syncs=existing_syncs
+                    )
 
             # All done, return 204 No Content        
             return make_response('', 204)
@@ -364,22 +364,22 @@ def handle_annotation_attachments(entitlement_id, annotation_id):
             return make_response(jsonify({"error": "No file selected"}), 400)
         
         # Save file locally
-            try:
-                attachment_dir = get_annotation_attachment_dir(entitlement_id)
-                # Use the original filename which includes the annotation ID
-                filepath = os.path.join(attachment_dir, file.filename)
-                file.save(filepath)
-                log.info(f"Saved annotation attachment: {filepath}")
-                
-                # Return success response matching Kobo's format
-                return make_response(
-                    jsonify(f"Attachment {file.filename} created."),
-                    201,
-                    {"Location": f"/api/v3/content/{entitlement_id}/annotations/{annotation_id}/attachments/{file.filename}"}
-                )
-            except Exception as e:
-                log.error(f"Failed to save attachment: {e}")
-                return make_response(jsonify({"error": "Failed to save file"}), 500)
+        try:
+            attachment_dir = get_annotation_attachment_dir(entitlement_id)
+            # Use the original filename which includes the annotation ID
+            filepath = os.path.join(attachment_dir, file.filename)
+            file.save(filepath)
+            log.info(f"Saved annotation attachment: {filepath}")
+            
+            # Return success response matching Kobo's format
+            return make_response(
+                jsonify(f"Attachment {file.filename} created."),
+                201,
+                {"Location": f"/api/v3/content/{entitlement_id}/annotations/{annotation_id}/attachments/{file.filename}"}
+            )
+        except Exception as e:
+            log.error(f"Failed to save attachment: {e}")
+            return make_response(jsonify({"error": "Failed to save file"}), 500)
     
     elif request.method == "GET":
         # Serve attachment file
@@ -405,9 +405,41 @@ def handle_annotation_attachments(entitlement_id, annotation_id):
 def handle_check_for_changes():
     """
     Handle check for changes request.
-    Proxies to Kobo's reading services.
+    Should check and remove any ContentId from the request body which are in our database,
+    then forward the request to Kobo.
+    The request body is like this:
+    [
+        {
+            "ContentId": "2f3dc386-13fb-4589-bab7-5090c4ab27e4",
+            "etag": "W/\"0\""
+        },
+        {
+            "ContentId": "c5c0b566-118e-486d-b330-4a614d7498f8",
+            "etag": "W/\"0\""
+        },
+        {
+            "ContentId": "23242d62-3b9b-49cf-b9d9-d2677de085c0",
+            "etag": "W/\"A:1408092558-7Uhimw6qgE+J7JpyxBiziA, A:1477029255-Iq992+H1kkGYzpOgLXvzNA, C:567181005-J6mRvrCcTUWY4kvt7J1ZUQ, B:1058700540-KkAV6b3EYE+6aKdGXLBjow, A:1406357443-Pjqr2DUG2UOnbnNOYb90pw, B:567634845-SIRCEgIeBEmUAlJyLcZDTg, B:547059529-TXS+v7oQ3Eauqnwo8PUJTg, B:523015816-Xa5fPrXDzUKhZNq2SoHh0g, B:380735-bLnBysoBh0qVtz+R+mCbjw, B:3342957-hrCcbwQ9j0WP3UkHR4s7yw, B:1365732017-iwFphRp+BESQ5b0/k57uiQ, C:1395537364-k/cTsFex1Ui7rkxU+a+IgQ, B:1405634018-oVGhqTo6eUen1tFgQ68Tcg, C:1408244964-vaH5IKpaTkmGrM6vHxI4/A\""
+        }
+    ]
     """
-    return proxy_to_kobo_reading_services()
+    # Check and remove any ContentId which are in our database
+    content_ids = request.json
+    new_content_ids = []
+    for item in content_ids:
+        content_id = item['ContentId']
+        book = get_book_by_entitlement_id(content_id)
+        if not book:
+            new_content_ids.append(item)
+
+    # Forward the request to Kobo with the new content IDs
+    if new_content_ids:
+        request.json = new_content_ids
+        return proxy_to_kobo_reading_services()
+    else:
+        # Nothing new, just return 200 with empty json array []
+        return make_response(jsonify([]), 200)
+    
 
 
 @csrf.exempt

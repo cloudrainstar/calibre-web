@@ -562,75 +562,75 @@ def handle_annotations(entitlement_id):
     Future enhancement: Check if book exists locally and serve emulated response
     instead of always proxying to Kobo.
     """
-    # First figure out if book is in our db
-    book = get_book_by_entitlement_id(entitlement_id)
-    if not book:
-        log.warning(f"Book not found for entitlement {entitlement_id}, skipping local sync")
-        return proxy_to_kobo_reading_services()
-    
-    # If the book is in our local database, we can handle the request locally
-    if request.method == "GET":
-        return handle_get_annotations(entitlement_id)
-    elif request.method == "PATCH":
-        try:
-            data = request.get_json()
-            log_annotation_data(entitlement_id, "PATCH", data)
-            # Handle deleted annotations
-            if data and "deletedAnnotationIds" in data:
-                deleted_ids = data["deletedAnnotationIds"]
-                log.info(f"Processing {len(deleted_ids)} deleted annotation IDs")
-                for annotation_id in deleted_ids:
-                    # Delete annotation record
-                    ub.session.query(ub.KoboAnnotation).filter(
-                        ub.KoboAnnotation.annotation_id == annotation_id,
-                        ub.KoboAnnotation.user_id == current_user.id
-                    ).delete()
-                    
-                    # Delete sync record
-                    ub.session.query(ub.KoboAnnotationSync).filter(
-                        ub.KoboAnnotationSync.annotation_id == annotation_id,
-                        ub.KoboAnnotationSync.user_id == current_user.id
-                    ).delete()
-                    
-                    log.info(f"Deleted annotation {annotation_id}")
+    # GET requests are proxied directly to Kobo at the end of the function
+    # We only intercept PATCH requests to sync changes to local database
+    if request.method == "PATCH":
+        # Get book from database
+        book = get_book_by_entitlement_id(entitlement_id)
+        if not book:
+            log.warning(f"Book not found for entitlement {entitlement_id}, skipping local sync")
+        else:
+            try:
+                data = request.get_json()
+                log_annotation_data(entitlement_id, "PATCH", data)
                 
-                try:
-                    ub.session_commit()
-                except Exception as e:
-                    log.error(f"Failed to delete annotations: {e}")
-                    ub.session.rollback()
-        
-            # Extract updated annotations
-            if data and "updatedAnnotations" in data:
-                annotations = data['updatedAnnotations']
-                log.info(f"Processing {len(annotations)} updated annotations")
-            
-                # Batch load existing sync records to avoid N+1 queries
-                existing_syncs = {}
-                annotation_ids = [a.get('id') for a in annotations if a.get('id')]
-                if annotation_ids:
-                    syncs = ub.session.query(ub.KoboAnnotationSync).filter(
-                        ub.KoboAnnotationSync.annotation_id.in_(annotation_ids),
-                        ub.KoboAnnotationSync.user_id == current_user.id
-                    ).all()
-                    existing_syncs = {s.annotation_id: s for s in syncs}
+                # Handle deleted annotations
+                if data and "deletedAnnotationIds" in data:
+                    deleted_ids = data["deletedAnnotationIds"]
+                    log.info(f"Processing {len(deleted_ids)} deleted annotation IDs")
+                    for annotation_id in deleted_ids:
+                        # Delete annotation record
+                        ub.session.query(ub.KoboAnnotation).filter(
+                            ub.KoboAnnotation.annotation_id == annotation_id,
+                            ub.KoboAnnotation.user_id == current_user.id
+                        ).delete()
+                        
+                        # Delete sync record
+                        ub.session.query(ub.KoboAnnotationSync).filter(
+                            ub.KoboAnnotationSync.annotation_id == annotation_id,
+                            ub.KoboAnnotationSync.user_id == current_user.id
+                        ).delete()
+                        
+                        log.info(f"Deleted annotation {annotation_id}")
+                    
+                    try:
+                        ub.session_commit()
+                    except Exception as e:
+                        log.error(f"Failed to delete annotations: {e}")
+                        ub.session.rollback()
                 
-                # Initialize progress calculator once per book
-                progress_calculator = EpubProgressCalculator(book)
+                # Extract updated annotations
+                if data and "updatedAnnotations" in data:
+                    annotations = data['updatedAnnotations']
+                    log.info(f"Processing {len(annotations)} updated annotations")
+                
+                    # Batch load existing sync records to avoid N+1 queries
+                    existing_syncs = {}
+                    annotation_ids = [a.get('id') for a in annotations if a.get('id')]
+                    if annotation_ids:
+                        syncs = ub.session.query(ub.KoboAnnotationSync).filter(
+                            ub.KoboAnnotationSync.annotation_id.in_(annotation_ids),
+                            ub.KoboAnnotationSync.user_id == current_user.id
+                        ).all()
+                        existing_syncs = {s.annotation_id: s for s in syncs}
+                    
+                    # Initialize progress calculator once per book
+                    progress_calculator = EpubProgressCalculator(book)
 
-                for annotation in annotations:
-                    process_annotation_for_sync(
-                        annotation=annotation, 
-                        book=book, 
-                        existing_syncs=existing_syncs,
-                        progress_calculator=progress_calculator
-                    )
+                    for annotation in annotations:
+                        process_annotation_for_sync(
+                            annotation=annotation, 
+                            book=book, 
+                            existing_syncs=existing_syncs,
+                            progress_calculator=progress_calculator
+                        )
 
-    except Exception as e:
-        log.error(f"Error processing PATCH annotations: {e}")
-        import traceback
-        log.error(traceback.format_exc())
+            except Exception as e:
+                log.error(f"Error processing PATCH annotations: {e}")
+                import traceback
+                log.error(traceback.format_exc())
     
+    # Proxy to Kobo reading services
     return proxy_to_kobo_reading_services()
 
 

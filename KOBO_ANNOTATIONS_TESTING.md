@@ -249,12 +249,13 @@ AUTH_TOKEN="your-kobo-auth-token"
 BOOK_UUID="book-uuid-here"
 
 # Test annotation retrieval (should proxy to Kobo)
-curl -X GET "http://localhost:8083/api/v3/content/${BOOK_UUID}/annotations" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}"
+curl -X GET "http://localhost:8083/readingservices/${AUTH_TOKEN}/api/v3/content/${BOOK_UUID}/annotations"
 
 # Note: PATCH requests require valid Kobo device headers
 # It's easier to test through actual device sync
 ```
+
+**Note:** The reading services API now uses per-user authentication via the auth token in the URL path, similar to the main Kobo sync endpoint.
 
 ## Success Criteria
 

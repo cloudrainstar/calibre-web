@@ -52,14 +52,14 @@ Response Body (JSON):
 
 ### 1. Get Annotations
 ```
-GET /api/v3/content/{book-uuid}/annotations
+GET /readingservices/{auth-token}/api/v3/content/{book-uuid}/annotations
 ```
 **Use:** Retrieve all annotations for a book
 **Response:** Array of annotation objects
 
 ### 2. Update Annotations
 ```
-PATCH /api/v3/content/{book-uuid}/annotations
+PATCH /readingservices/{auth-token}/api/v3/content/{book-uuid}/annotations
 ```
 **Body:** 
 ```json
@@ -72,15 +72,17 @@ PATCH /api/v3/content/{book-uuid}/annotations
 
 ### 3. Check for Changes
 ```
-POST /api/v3/content/checkforchanges
+POST /readingservices/{auth-token}/api/v3/content/checkforchanges
 ```
 **Use:** Device checks if server has updates
 
 ### 4. UserStorage Requests
 ```
-GET/POST /api/UserStorage/Metadata
+GET/POST /readingservices/{auth-token}/api/UserStorage/Metadata
 ```
 **Use:** Sync device metadata
+
+**Note:** All Reading Services endpoints now require the user's auth token in the URL path for per-user authentication.
 
 ## Annotation Object Structure
 

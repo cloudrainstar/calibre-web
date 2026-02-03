@@ -35,14 +35,16 @@ from werkzeug.datastructures import Headers
 import requests
 from lxml import etree
 
-from . import logger, calibre_db, db, config, ub, csrf
+from . import logger, calibre_db, db, config, ub, csrf, kobo_auth
 from .cw_login import current_user
 
 log = logger.create()
 
-# Create blueprints to handle the relevant reading services API routes
-readingservices_api_v3 = Blueprint("readingservices_api_v3", __name__, url_prefix="/api/v3")
-readingservices_userstorage = Blueprint("readingservices_userstorage", __name__, url_prefix="/api/UserStorage")
+# Create blueprint to handle the relevant reading services API routes
+# Uses auth token in URL like main Kobo blueprint for per-user authentication
+readingservices = Blueprint("readingservices", __name__, url_prefix="/readingservices/<auth_token>")
+kobo_auth.disable_failed_auth_redirect_for_blueprint(readingservices)
+kobo_auth.register_url_value_preprocessor(readingservices)
 
 KOBO_READING_SERVICES_URL = "https://readingservices.kobo.com"
 
@@ -549,7 +551,7 @@ def process_annotation_for_sync(annotation, book, existing_syncs=None, progress_
 
 
 @csrf.exempt
-@readingservices_api_v3.route("/content/<entitlement_id>/annotations", methods=["GET", "PATCH"])
+@readingservices.route("/api/v3/content/<entitlement_id>/annotations", methods=["GET", "PATCH"])
 @requires_reading_services_auth
 def handle_annotations(entitlement_id):
     """
@@ -637,7 +639,7 @@ def handle_annotations(entitlement_id):
 
 
 @csrf.exempt
-@readingservices_api_v3.route("/content/checkforchanges", methods=["POST"])
+@readingservices.route("/api/v3/content/checkforchanges", methods=["POST"])
 @requires_reading_services_auth
 def handle_check_for_changes():
     """
@@ -648,7 +650,7 @@ def handle_check_for_changes():
 
 
 @csrf.exempt
-@readingservices_userstorage.route("/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@readingservices.route("/api/UserStorage/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 @requires_reading_services_auth
 def handle_user_storage(subpath):
     """
@@ -659,7 +661,7 @@ def handle_user_storage(subpath):
 
 
 @csrf.exempt
-@readingservices_api_v3.route("/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@readingservices.route("/api/v3/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 @requires_reading_services_auth
 def handle_unknown_reading_service_request(subpath):
     """

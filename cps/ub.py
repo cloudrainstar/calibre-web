@@ -496,17 +496,9 @@ class KoboAnnotation(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('user.id'))
     book_id = Column(Integer)
-    annotation_id = Column(String)  # Kobo's unique annotation ID
-    annotation_type = Column(String)  # "highlight" or "note"
-    highlighted_text = Column(String)
-    note_text = Column(String)
-    highlight_color = Column(String)
-    location_value = Column(String)
-    location_type = Column(String)
-    location_source = Column(String)
-    chapter_filename = Column(String)
-    chapter_progress = Column(Float)
-    progress_percent = Column(Float)
+    annotation_id = Column(String, unique=True)  # Kobo's unique annotation ID
+    annotation_type = Column(String)  # "highlight", "note", "markup", or "dogear"
+    annotation_data = Column(JSON)  # Store complete annotation data as JSON
     created = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -651,6 +643,33 @@ def migrate_readbook_table(engine, _session):
             trans.commit()
 
 
+def migrate_kobo_annotation_table(engine, _session):
+    """Migrate kobo_annotation table to new simplified schema with JSON storage"""
+    try:
+        # Check if old schema exists by querying for old columns
+        _session.query(exists().where(KoboAnnotation.annotation_data)).scalar()
+        _session.commit()
+    except exc.OperationalError:
+        # Old schema exists, need to migrate
+        # Drop and recreate table since schema change is significant
+        with engine.connect() as conn:
+            trans = conn.begin()
+            try:
+                # Drop old tables
+                conn.execute(text("DROP TABLE IF EXISTS kobo_annotation"))
+                conn.execute(text("DROP TABLE IF EXISTS kobo_annotation_sync"))
+                trans.commit()
+            except Exception as e:
+                trans.rollback()
+                log.error(f"Error migrating kobo_annotation table: {e}")
+        
+        # Recreate tables with new schema
+        if not engine.dialect.has_table(engine.connect(), "kobo_annotation"):
+            KoboAnnotation.__table__.create(bind=engine)
+        if not engine.dialect.has_table(engine.connect(), "kobo_annotation_sync"):
+            KoboAnnotationSync.__table__.create(bind=engine)
+
+
 # Migrate database to current version, has to be updated after every database change. Currently, migration from
 # maybe 4/5 versions back to current should work.
 # Migration is done by checking if relevant columns are existing, and then adding rows with SQL commands
@@ -660,6 +679,7 @@ def migrate_Database(_session):
     migrate_registration_table(engine, _session)
     migrate_user_session_table(engine, _session)
     migrate_readbook_table(engine, _session)
+    migrate_kobo_annotation_table(engine, _session)
 
 
 def clean_database(_session):

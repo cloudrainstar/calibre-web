@@ -26,14 +26,11 @@ These routes are at the root level: /api/v3/..., /api/UserStorage/...
 
 import json
 import os
-import zipfile
-import re
 from datetime import datetime, timezone
 from functools import wraps
 from flask import Blueprint, request, make_response, jsonify, abort
 from werkzeug.datastructures import Headers
 import requests
-from lxml import etree
 
 from . import logger, calibre_db, db, config, ub, csrf, kobo_auth
 from .cw_login import current_user
@@ -59,14 +56,6 @@ CONNECTION_SPECIFIC_HEADERS = [
 def proxy_to_kobo_reading_services():
     """
     Proxy the request to Kobo's reading services API.
-    
-    This function captures both request and response data for debugging and potential
-    emulation. The captured data can be used to:
-    1. Understand Kobo's API structure
-    2. Build offline/cached responses for books in local database
-    3. Debug annotation sync issues
-    
-    To enable detailed capture logging, set log level to DEBUG in Calibre-Web settings.
     """
     try:
         kobo_url = KOBO_READING_SERVICES_URL + request.path
@@ -75,35 +64,8 @@ def proxy_to_kobo_reading_services():
         
         log.debug(f"Proxying {request.method} to Kobo Reading Services: {kobo_url}")
         
-        # Capture request data for emulation
+        # Get request body
         request_body = request.get_data()
-        log.debug("=" * 80)
-        log.debug("KOBO READING SERVICES - REQUEST CAPTURE")
-        log.debug("=" * 80)
-        log.debug(f"Method: {request.method}")
-        log.debug(f"Path: {request.path}")
-        log.debug(f"Full URL: {kobo_url}")
-        log.debug(f"Query String: {request.query_string.decode('utf-8') if request.query_string else 'None'}")
-        
-        # Log request headers (redact sensitive info)
-        log.debug("Request Headers:")
-        for header_name, header_value in request.headers.items():
-            if header_name.lower() in ['authorization', 'cookie', 'x-kobo-userkey']:
-                log.debug(f"  {header_name}: [REDACTED]")
-            else:
-                log.debug(f"  {header_name}: {header_value}")
-        
-        # Log request body
-        if request_body:
-            try:
-                request_json = json.loads(request_body)
-                log.debug("Request Body (JSON):")
-                log.debug(json.dumps(request_json, indent=2))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                log.debug(f"Request Body (Raw, {len(request_body)} bytes):")
-                log.debug(request_body[:500])  # First 500 bytes
-        else:
-            log.debug("Request Body: (empty)")
         
         # Forward headers (including Authorization, x-kobo-userkey, etc.)
         outgoing_headers = Headers(request.headers)
@@ -119,41 +81,6 @@ def proxy_to_kobo_reading_services():
             allow_redirects=False,
             timeout=(2, 10)
         )
-        
-        # Capture response data for emulation
-        log.debug("-" * 80)
-        log.debug("KOBO READING SERVICES - RESPONSE CAPTURE")
-        log.debug("-" * 80)
-        log.debug(f"Status Code: {readingservices_response.status_code}")
-        log.debug(f"Status Text: {readingservices_response.reason}")
-        
-        # Log response headers
-        log.debug("Response Headers:")
-        for header_name, header_value in readingservices_response.headers.items():
-            if header_name.lower() in ['set-cookie']:
-                log.debug(f"  {header_name}: [REDACTED]")
-            else:
-                log.debug(f"  {header_name}: {header_value}")
-        
-        # Log response body
-        response_content = readingservices_response.content
-        if response_content:
-            content_type = readingservices_response.headers.get('Content-Type', '')
-            try:
-                if 'application/json' in content_type:
-                    response_json = json.loads(response_content)
-                    log.debug("Response Body (JSON):")
-                    log.debug(json.dumps(response_json, indent=2))
-                else:
-                    log.debug(f"Response Body ({content_type}, {len(response_content)} bytes):")
-                    log.debug(response_content[:500])  # First 500 bytes
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                log.debug(f"Response Body (Raw, {len(response_content)} bytes):")
-                log.debug(response_content[:500])
-        else:
-            log.debug("Response Body: (empty)")
-        
-        log.debug("=" * 80)
         
         if readingservices_response.status_code >= 400:
             log.warning(f"Kobo Reading Services error {readingservices_response.status_code}")
@@ -181,57 +108,6 @@ def proxy_to_kobo_reading_services():
         import traceback
         log.error(traceback.format_exc())
         return make_response(jsonify({"error": "Internal server error"}), 500)
-
-
-def can_emulate_kobo_response(entitlement_id=None):
-    """
-    Check if we can serve an emulated/cached response instead of proxying to Kobo.
-    
-    This is a placeholder for future functionality where responses can be:
-    - Served from cache for performance
-    - Generated locally for offline operation
-    - Customized based on local book database
-    
-    Args:
-        entitlement_id: Book UUID to check if we have local data
-    
-    Returns:
-        bool: True if we can emulate the response locally
-        
-    TODO: Implement logic to:
-    1. Check if book exists in local database
-    2. Verify we have cached response data
-    3. Check if response is still valid/fresh
-    """
-    # For now, always proxy to Kobo
-    # Future implementation could check:
-    # - if book.uuid == entitlement_id exists in calibre_db
-    # - if we have cached Kobo response data
-    # - if user prefers offline mode
-    return False
-
-
-def emulate_kobo_response(request_type, entitlement_id=None):
-    """
-    Generate an emulated Kobo Reading Services response from local data.
-    
-    This is a placeholder for future functionality.
-    
-    Args:
-        request_type: Type of request (e.g., 'annotations', 'metadata')
-        entitlement_id: Book UUID
-        
-    Returns:
-        Flask response object with emulated data
-        
-    TODO: Implement based on captured request/response patterns
-    """
-    # Placeholder - would build response from local database
-    # Example for annotations:
-    # - Query kobo_annotation table for this book
-    # - Format as Kobo expects
-    # - Return with appropriate headers
-    return make_response(jsonify({"error": "Emulation not yet implemented"}), 501)
 
 
 def requires_reading_services_auth(f):
@@ -286,136 +162,16 @@ def log_annotation_data(entitlement_id, method, data=None):
         log.debug(json.dumps(data, indent=2))
 
 
-class EpubProgressCalculator:
-    """
-    Helper class to calculate progress from EPUB/KEPUB files efficiently.
-    Parses the book structure once and reuses it for multiple calculations.
-    """
-    def __init__(self, book: db.Books):
-        self.book = book
-        self.spine_items = []
-        self.chapter_lengths = []
-        self.total_chars = 0
-        self.initialized = False
-        self.error = False
-
-    def _initialize(self):
-        if self.initialized:
-            return
-
-        if not self.book or not self.book.path:
-            self.error = True
-            return
-
-        book_data = None
-        kepub_datas = [data for data in self.book.data if data.format.lower() == 'kepub']
-        if len(kepub_datas) >= 1:
-            book_data = kepub_datas[0]
-        else:
-            epub_datas = [data for data in self.book.data if data.format.lower() == 'epub']
-            if len(epub_datas) >= 1:
-                book_data = epub_datas[0]
-        
-        if not book_data:
-            self.error = True
-            return
-
-        try:
-            file_path = os.path.normpath(os.path.join(
-                config.get_book_path(),
-                self.book.path,
-                book_data.name + "." + book_data.format.lower()
-            ))
-            
-            if not os.path.exists(file_path):
-                self.error = True
-                return
-            
-            with zipfile.ZipFile(file_path, 'r') as epub_zip:
-                # Find OPF
-                container_data = epub_zip.read('META-INF/container.xml')
-                container_tree = etree.fromstring(container_data)
-                ns = {
-                    'container': 'urn:oasis:names:tc:opendocument:xmlns:container',
-                    'opf': 'http://www.idpf.org/2007/opf'
-                }
-                opf_path = container_tree.xpath(
-                    '//container:rootfile/@full-path',
-                    namespaces={'container': ns['container']}
-                )[0]
-                
-                # Parse OPF
-                opf_data = epub_zip.read(opf_path)
-                opf_tree = etree.fromstring(opf_data)
-                opf_dir = os.path.dirname(opf_path)
-                
-                # Get manifest
-                manifest = {}
-                for item in opf_tree.xpath('//opf:manifest/opf:item', namespaces={'opf': ns['opf']}):
-                    item_id = item.get('id')
-                    href = item.get('href')
-                    if item_id and href:
-                        full_href = os.path.normpath(os.path.join(opf_dir, href)).replace('\\', '/')
-                        manifest[item_id] = full_href
-                
-                # Get spine
-                for itemref in opf_tree.xpath('//opf:spine/opf:itemref', namespaces={'opf': ns['opf']}):
-                    idref = itemref.get('idref')
-                    if idref and idref in manifest:
-                        self.spine_items.append(manifest[idref])
-                
-                if not self.spine_items:
-                    self.error = True
-                    return
-
-                # Calculate lengths
-                for spine_item in self.spine_items:
-                    try:
-                        content = epub_zip.read(spine_item).decode('utf-8', errors='ignore')
-                        try:
-                            html_tree = etree.fromstring(content.encode('utf-8'))
-                            text_content = ''.join(html_tree.itertext())
-                            char_count = len(text_content.strip())
-                        except etree.XMLSyntaxError:
-                            text_content = re.sub(r'<[^>]+>', '', content)
-                            char_count = len(text_content.strip())
-                        self.chapter_lengths.append(char_count)
-                    except Exception:
-                        self.chapter_lengths.append(0)
-                
-                self.total_chars = sum(self.chapter_lengths)
-                self.initialized = True
-
-        except Exception as e:
-            log.error(f"Error initializing EPUB calculator: {e}")
-            self.error = True
-
-    def calculate(self, chapter_filename: str, chapter_progress: float):
-        if not self.initialized:
-            self._initialize()
-        
-        if self.error or self.total_chars == 0:
-            return None
-
-        normalized_chapter = chapter_filename.replace('\\', '/')
-        target_chapter_index = None
-        
-        for idx, spine_item in enumerate(self.spine_items):
-            if normalized_chapter in spine_item or spine_item.endswith(normalized_chapter):
-                target_chapter_index = idx
-                break
-        
-        if target_chapter_index is None:
-            return None
-        
-        chars_before = sum(self.chapter_lengths[:target_chapter_index])
-        chars_in_chapter = self.chapter_lengths[target_chapter_index]
-        chars_read = chars_before + (chars_in_chapter * chapter_progress)
-        
-        return (chars_read / self.total_chars) * 100
+# Helper functions for file management
+def get_annotation_attachment_dir(entitlement_id):
+    """Get the directory path for storing annotation attachments"""
+    user_token = kobo_auth.get_auth_token()
+    attachment_dir = os.path.join(config.config_calibre_dir, "kobo_annotations", user_token, entitlement_id)
+    os.makedirs(attachment_dir, exist_ok=True)
+    return attachment_dir
 
 
-def process_annotation_for_sync(annotation, book, existing_syncs=None, progress_calculator=None):
+def process_annotation_for_sync(annotation, book, existing_syncs=None):
     """
     Process a single annotation and store in database.
     
@@ -423,23 +179,14 @@ def process_annotation_for_sync(annotation, book, existing_syncs=None, progress_
         annotation: Annotation dict from Kobo
         book: Calibre book object
         existing_syncs: Optional dict of {annotation_id: sync_record} for batch processing
-        progress_calculator: EpubProgressCalculator instance for this book
     
     Returns:
         True if stored successfully, False otherwise
     """
     annotation_id = annotation.get('id')
-    highlighted_text = annotation.get('highlightedText')
-    note_text = annotation.get('noteText')
-    highlight_color = annotation.get('highlightColor')
     annotation_type = annotation.get('type', 'highlight')
 
-    # Skip if no text content
-    if not highlighted_text and not note_text:
-        log.warning("Skipping annotation with no text content")
-        return False
-
-    # Check if already synced
+    # Check if annotation ID exists
     if not annotation_id:
         log.warning("Annotation ID is required for sync")
         return False
@@ -460,70 +207,22 @@ def process_annotation_for_sync(annotation, book, existing_syncs=None, progress_
         ub.KoboAnnotation.annotation_id == annotation_id,
         ub.KoboAnnotation.user_id == current_user.id
     ).first()
-    
-    # Check if content has changed
-    if existing_annotation and existing_sync:
-        if (existing_annotation.highlighted_text == highlighted_text and 
-            existing_annotation.note_text == note_text and 
-            existing_annotation.highlight_color == highlight_color):
-            log.debug(f"Annotation {annotation_id} unchanged, skipping")
-            return False
-    
-    # Calculate progress
-    progress_percent = None
-    chapter_filename = annotation.get('location', {}).get('span', {}).get('chapterFilename')
-    chapter_progress = annotation.get('location', {}).get('span', {}).get('chapterProgress', 0)
-    
-    if progress_calculator and chapter_filename:
-        progress_percent = progress_calculator.calculate(chapter_filename, chapter_progress)
-        if progress_percent is None:
-            log.warning(f"Failed to calculate exact progress for annotation in book '{book.title}' (ID: {book.id})")
-
-    # Extract location data
-    location = annotation.get('location', {}).get('span', {})
-    location_value = None
-    location_type = None
-    location_source = None
-    
-    if location:
-        # Try to get location info from start path
-        start_path = location.get('startPath')
-        if start_path:
-            location_value = start_path
-            location_type = 'xpath'
-            location_source = 'kobo'
 
     try:
         if existing_annotation:
-            # Update existing annotation
-            existing_annotation.highlighted_text = highlighted_text
-            existing_annotation.note_text = note_text
-            existing_annotation.highlight_color = highlight_color
+            # Update existing annotation with full JSON data
             existing_annotation.annotation_type = annotation_type
-            existing_annotation.chapter_filename = chapter_filename
-            existing_annotation.chapter_progress = chapter_progress
-            existing_annotation.progress_percent = progress_percent
-            existing_annotation.location_value = location_value
-            existing_annotation.location_type = location_type
-            existing_annotation.location_source = location_source
+            existing_annotation.annotation_data = annotation
             existing_annotation.last_modified = datetime.now(timezone.utc)
             log.info(f"Updated annotation {annotation_id} for book {book.id}")
         else:
-            # Create new annotation
+            # Create new annotation with full JSON data
             new_annotation = ub.KoboAnnotation(
                 user_id=current_user.id,
                 book_id=book.id,
                 annotation_id=annotation_id,
                 annotation_type=annotation_type,
-                highlighted_text=highlighted_text,
-                note_text=note_text,
-                highlight_color=highlight_color,
-                location_value=location_value,
-                location_type=location_type,
-                location_source=location_source,
-                chapter_filename=chapter_filename,
-                chapter_progress=chapter_progress,
-                progress_percent=progress_percent
+                annotation_data=annotation
             )
             ub.session.add(new_annotation)
             log.info(f"Created new annotation {annotation_id} for book {book.id}")
@@ -558,21 +257,30 @@ def handle_annotations(entitlement_id):
     Handle annotation requests for a specific book.
     GET: Retrieve all annotations for a book
     PATCH: Update/create annotations
-    
-    Future enhancement: Check if book exists locally and serve emulated response
-    instead of always proxying to Kobo.
     """
-    # GET requests are proxied directly to Kobo at the end of the function
-    # We only intercept PATCH requests to sync changes to local database
-    if request.method == "PATCH":
-        # Get book from database
-        book = get_book_by_entitlement_id(entitlement_id)
-        if not book:
-            log.warning(f"Book not found for entitlement {entitlement_id}, skipping local sync")
-        else:
-            try:
-                data = request.get_json()
-                log_annotation_data(entitlement_id, "PATCH", data)
+    # If book is not in our database, proxy to Kobo
+    book = get_book_by_entitlement_id(entitlement_id)
+    if not book:
+        log.warning(f"Book not found for entitlement {entitlement_id}, skipping local sync")
+        return proxy_to_kobo_reading_services()
+
+    if request.method == "GET":
+        # Return annotations from local database
+        annotations = ub.session.query(ub.KoboAnnotation).filter(
+            ub.KoboAnnotation.book_id == book.id,
+            ub.KoboAnnotation.user_id == current_user.id
+        ).all()
+        
+        annotation_list = []
+        for ann in annotations:
+            if ann.annotation_data:
+                annotation_list.append(ann.annotation_data)
+        
+        return jsonify({"annotations": annotation_list, "nextPageOffsetToken": None})
+    elif request.method == "PATCH":
+        try:
+            data = request.get_json()
+            log_annotation_data(entitlement_id, "PATCH", data)
                 
                 # Handle deleted annotations
                 if data and "deletedAnnotationIds" in data:
@@ -613,25 +321,82 @@ def handle_annotations(entitlement_id):
                             ub.KoboAnnotationSync.user_id == current_user.id
                         ).all()
                         existing_syncs = {s.annotation_id: s for s in syncs}
-                    
-                    # Initialize progress calculator once per book
-                    progress_calculator = EpubProgressCalculator(book)
 
                     for annotation in annotations:
                         process_annotation_for_sync(
                             annotation=annotation, 
                             book=book, 
-                            existing_syncs=existing_syncs,
-                            progress_calculator=progress_calculator
+                            existing_syncs=existing_syncs
                         )
 
-            except Exception as e:
-                log.error(f"Error processing PATCH annotations: {e}")
-                import traceback
-                log.error(traceback.format_exc())
+            # All done, return 204 No Content        
+            return make_response('', 204)
+
+        except Exception as e:
+            log.error(f"Error processing PATCH annotations: {e}")
+            import traceback
+            log.error(traceback.format_exc())
+            return make_response(jsonify({"error": "Internal server error"}), 500)
+    else:
+        return proxy_to_kobo_reading_services() # Catch-all for other methods
+
+
+@csrf.exempt
+@readingservices.route("/api/v3/content/<entitlement_id>/annotations/<annotation_id>/attachments", methods=["POST", "GET"])
+@requires_reading_services_auth
+def handle_annotation_attachments(entitlement_id, annotation_id):
+    """
+    Handle annotation attachment uploads (JPG and SVG files for markup annotations).
+    Stores files locally organized by user and book.
+    """
+    book = get_book_by_entitlement_id(entitlement_id)
+    if not book:
+        log.warning(f"Book not found for entitlement {entitlement_id}, skipping local sync")
+        return proxy_to_kobo_reading_services()
     
-    # Proxy to Kobo reading services
-    return proxy_to_kobo_reading_services()
+    if request.method == "POST":
+        # Handle file upload
+        if 'attachment' not in request.files:
+            return make_response(jsonify({"error": "No file provided"}), 400)
+        
+        file = request.files['attachment']
+        if file.filename == '':
+            return make_response(jsonify({"error": "No file selected"}), 400)
+        
+        # Save file locally
+            try:
+                attachment_dir = get_annotation_attachment_dir(entitlement_id)
+                # Use the original filename which includes the annotation ID
+                filepath = os.path.join(attachment_dir, file.filename)
+                file.save(filepath)
+                log.info(f"Saved annotation attachment: {filepath}")
+                
+                # Return success response matching Kobo's format
+                return make_response(
+                    jsonify(f"Attachment {file.filename} created."),
+                    201,
+                    {"Location": f"/api/v3/content/{entitlement_id}/annotations/{annotation_id}/attachments/{file.filename}"}
+                )
+            except Exception as e:
+                log.error(f"Failed to save attachment: {e}")
+                return make_response(jsonify({"error": "Failed to save file"}), 500)
+    
+    elif request.method == "GET":
+        # Serve attachment file
+        try:
+            # Extract filename from URL (last part of the path)
+            filename = request.path.split('/')[-1]
+            attachment_dir = get_annotation_attachment_dir(entitlement_id)
+            filepath = os.path.join(attachment_dir, filename)
+            
+            if os.path.exists(filepath):
+                from flask import send_file
+                return send_file(filepath)
+            else:
+                return make_response(jsonify({"error": "File not found"}), 404)
+        except Exception as e:
+            log.error(f"Failed to serve attachment: {e}")
+            return make_response(jsonify({"error": "Failed to serve file"}), 500)
 
 
 @csrf.exempt

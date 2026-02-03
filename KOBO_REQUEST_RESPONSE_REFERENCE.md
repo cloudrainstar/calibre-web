@@ -1,6 +1,10 @@
-# Kobo Reading Services - Request/Response Quick Reference
+# Kobo API - Request/Response Quick Reference
 
 This is a quick reference for the captured request/response patterns you'll see in the logs.
+
+Calibre-Web captures **two types** of Kobo API interactions:
+1. **Kobo Store API** - Main sync, library, metadata requests
+2. **Kobo Reading Services API** - Annotations and reading state
 
 ## Viewing Captured Data
 
@@ -11,10 +15,19 @@ Admin Panel > Basic Configuration > Logging > Log Level: Debug
 
 **Watch logs in real-time:**
 ```bash
+# Watch all Kobo API traffic
+tail -f /path/to/calibre-web.log | grep -A 100 "KOBO"
+
+# Watch only Reading Services (annotations)
 tail -f /path/to/calibre-web.log | grep -A 100 "KOBO READING SERVICES"
+
+# Watch only Store API (sync, library)
+tail -f /path/to/calibre-web.log | grep -A 100 "KOBO STORE API"
 ```
 
 ## Log Output Format
+
+### Reading Services (Annotations)
 
 ```
 ================================================================================
@@ -48,16 +61,82 @@ Response Body (JSON):
 ================================================================================
 ```
 
+### Store API (Library Sync, Metadata)
+
+```
+================================================================================
+KOBO STORE API - REQUEST CAPTURE
+================================================================================
+Method: [GET|POST|PATCH|DELETE]
+Path: /kobo/{auth-token}/v1/library/sync
+Full URL: https://storeapi.kobo.com/v1/library/sync
+Query String: [parameters if any]
+Request Headers:
+  Content-Type: application/json
+  x-kobo-synctoken: ...
+  User-Agent: ...
+Request Body (JSON):
+{
+  ... request data ...
+}
+--------------------------------------------------------------------------------
+KOBO STORE API - RESPONSE CAPTURE
+--------------------------------------------------------------------------------
+Status Code: 200
+Status Text: OK
+Response Headers:
+  Content-Type: application/json
+  x-kobo-sync: continue
+Response Body (JSON):
+{
+  ... response data ...
+}
+================================================================================
+```
+
 ## Common Endpoints Captured
 
-### 1. Get Annotations
+### Store API Endpoints
+
+#### 1. Library Sync
+```
+GET /v1/library/sync
+```
+**Use:** Main sync endpoint - gets book list and updates
+**Headers:** x-kobo-synctoken (tracks sync state)
+**Response:** Array of books with metadata
+
+#### 2. Book Metadata
+```
+GET /v1/library/{book-uuid}/metadata
+```
+**Use:** Get detailed metadata for a book
+**Response:** Complete book information
+
+#### 3. Authentication
+```
+POST /v1/auth/device
+```
+**Use:** Device authentication
+**Body:** Device credentials
+
+#### 4. Initialization
+```
+GET /v1/initialization
+```
+**Use:** Get Kobo service endpoints and configuration
+**Response:** Resources URLs and settings
+
+### Reading Services Endpoints
+
+#### 1. Get Annotations
 ```
 GET /api/v3/content/{book-uuid}/annotations
 ```
 **Use:** Retrieve all annotations for a book
 **Response:** Array of annotation objects
 
-### 2. Update Annotations
+#### 2. Update Annotations
 ```
 PATCH /api/v3/content/{book-uuid}/annotations
 ```
@@ -70,13 +149,13 @@ PATCH /api/v3/content/{book-uuid}/annotations
 ```
 **Use:** Sync annotation changes from device
 
-### 3. Check for Changes
+#### 3. Check for Changes
 ```
 POST /api/v3/content/checkforchanges
 ```
 **Use:** Device checks if server has updates
 
-### 4. UserStorage Requests
+#### 4. UserStorage Requests
 ```
 GET/POST /api/UserStorage/Metadata
 ```
@@ -161,9 +240,24 @@ Date: Mon, 15 Jan 2024 10:30:00 GMT
 
 ## Extracting Data from Logs
 
+### Get all Store API requests
+```bash
+grep -B 5 -A 50 'KOBO STORE API - REQUEST' calibre-web.log
+```
+
+### Get all Reading Services requests
+```bash
+grep -B 5 -A 50 'KOBO READING SERVICES - REQUEST' calibre-web.log
+```
+
 ### Get all annotation PATCH requests
 ```bash
 grep -B 5 -A 50 'Method: PATCH' calibre-web.log | grep -A 50 '/annotations'
+```
+
+### Get all library sync requests
+```bash
+grep -B 5 -A 50 '/v1/library/sync' calibre-web.log
 ```
 
 ### Get all response bodies
@@ -179,6 +273,15 @@ grep -B 10 'Status Code: [4-5]' calibre-web.log
 ### Extract specific book's data
 ```bash
 grep -B 5 -A 50 'book-uuid-here' calibre-web.log
+```
+
+### Separate Store vs Reading Services
+```bash
+# Only Store API
+grep -A 50 'KOBO STORE API' calibre-web.log > store_api.log
+
+# Only Reading Services
+grep -A 50 'KOBO READING SERVICES' calibre-web.log > reading_services.log
 ```
 
 ## Building Your Emulation
@@ -286,16 +389,31 @@ When emulating responses:
 # Enable debug mode (in Python/Flask)
 export FLASK_DEBUG=1
 
-# Watch for annotation syncs
+# Watch for ALL Kobo API traffic
+tail -f calibre-web.log | grep -E '(KOBO STORE|KOBO READING)'
+
+# Watch for annotation syncs only
 tail -f calibre-web.log | grep -i annotation
 
-# Count captured requests
-grep "REQUEST CAPTURE" calibre-web.log | wc -l
+# Watch for library syncs only
+tail -f calibre-web.log | grep 'library/sync'
 
-# Export captured data
-grep -A 100 "REQUEST CAPTURE" calibre-web.log > requests.json
+# Count captured Store API requests
+grep "KOBO STORE API - REQUEST" calibre-web.log | wc -l
 
-# Search for specific book
+# Count captured Reading Services requests
+grep "KOBO READING SERVICES - REQUEST" calibre-web.log | wc -l
+
+# Export all captured data
+grep -A 100 "REQUEST CAPTURE" calibre-web.log > all_requests.log
+
+# Export only Store API data
+grep -A 100 "KOBO STORE API" calibre-web.log > store_requests.log
+
+# Export only Reading Services data
+grep -A 100 "KOBO READING SERVICES" calibre-web.log > reading_requests.log
+
+# Search for specific book across all APIs
 grep "book-uuid" calibre-web.log | less
 ```
 

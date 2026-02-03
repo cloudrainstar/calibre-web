@@ -196,7 +196,7 @@ WHERE user_id = YOUR_USER_ID;
 
 ## Capturing Request/Response for Emulation
 
-The reading services proxy captures all request and response data when log level is set to DEBUG. This allows you to:
+Both the Kobo Store API proxy and Reading Services proxy capture all request and response data when log level is set to DEBUG. This allows you to:
 
 1. **Understand Kobo's API structure** for potential offline operation
 2. **Build cached/emulated responses** for books in your database
@@ -212,6 +212,7 @@ The reading services proxy captures all request and response data when log level
 
 Check your Calibre-Web log file for entries like:
 
+**Reading Services (Annotations):**
 ```
 ===============================================================================
 KOBO READING SERVICES - REQUEST CAPTURE
@@ -229,6 +230,22 @@ KOBO READING SERVICES - RESPONSE CAPTURE
 -------------------------------------------------------------------------------
 Status Code: 200
 Response Body (JSON):
+...
+===============================================================================
+```
+
+**Store API (Library Sync, Metadata):**
+```
+===============================================================================
+KOBO STORE API - REQUEST CAPTURE
+===============================================================================
+Method: GET
+Path: /kobo/{auth}/v1/library/sync
+...
+-------------------------------------------------------------------------------
+KOBO STORE API - RESPONSE CAPTURE
+-------------------------------------------------------------------------------
+Status Code: 200
 ...
 ===============================================================================
 ```

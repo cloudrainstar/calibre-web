@@ -640,6 +640,17 @@ def migrate_user_session_table(engine, _session):
             trans.commit()
 
 
+def migrate_readbook_table(engine, _session):
+    try:
+        _session.query(exists().where(ReadBook.last_time_finished)).scalar()
+        _session.commit()
+    except exc.OperationalError:  # Database is not compatible, some columns are missing
+        with engine.connect() as conn:
+            trans = conn.begin()
+            conn.execute(text("ALTER TABLE book_read_link ADD column 'last_time_finished' DateTime"))
+            trans.commit()
+
+
 # Migrate database to current version, has to be updated after every database change. Currently, migration from
 # maybe 4/5 versions back to current should work.
 # Migration is done by checking if relevant columns are existing, and then adding rows with SQL commands
@@ -648,6 +659,7 @@ def migrate_Database(_session):
     add_missing_tables(engine, _session)
     migrate_registration_table(engine, _session)
     migrate_user_session_table(engine, _session)
+    migrate_readbook_table(engine, _session)
 
 
 def clean_database(_session):

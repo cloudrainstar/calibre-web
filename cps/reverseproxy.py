@@ -48,9 +48,10 @@ class ReverseProxied(object):
     In nginx:
     location /myprefix {
         proxy_pass http://127.0.0.1:8083;
-        proxy_set_header Host $host;
+
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Scheme $scheme;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Script-Name /myprefix;
         }
     """
@@ -69,7 +70,8 @@ class ReverseProxied(object):
             if path_info and path_info.startswith(script_name):
                 environ['PATH_INFO'] = path_info[len(script_name):]
 
-        scheme = environ.get('HTTP_X_SCHEME', '')
+        # Use standard X-Forwarded-Proto header, fallback to X-Scheme for backward compatibility
+        scheme = environ.get('HTTP_X_FORWARDED_PROTO', '') or environ.get('HTTP_X_SCHEME', '')
         if scheme:
             environ['wsgi.url_scheme'] = scheme
         servr = environ.get('HTTP_X_FORWARDED_HOST', '')

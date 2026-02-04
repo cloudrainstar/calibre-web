@@ -1233,7 +1233,9 @@ def HandleInitRequest():
         # Only use base URL - device ID in header will identify the user
         kobo_resources["reading_services_host"] = calibre_web_url
     else:
-        kobo_resources["image_host"] = url_for("web.index", _external=True).strip("/")
+        # Received proxied request, use the base URL
+        calibre_web_url = url_for("web.index", _external=True).strip("/")
+        kobo_resources["image_host"] = calibre_web_url
         kobo_resources["image_url_quality_template"] = unquote(url_for("kobo.HandleCoverImageRequest",
                                                                        auth_token=kobo_auth.get_auth_token(),
                                                                        book_uuid="{ImageId}",
@@ -1251,7 +1253,7 @@ def HandleInitRequest():
                                                                _external=True))
         # Set reading services host to enable local annotation storage
         # Only use base URL - device ID in header will identify the user
-        kobo_resources["reading_services_host"] = url_for("web.index", _external=True).strip("/")
+        kobo_resources["reading_services_host"] = calibre_web_url
 
     response = make_response(jsonify({"Resources": kobo_resources}))
     response.headers["x-kobo-apitoken"] = "e30="

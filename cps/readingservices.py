@@ -54,9 +54,13 @@ CONNECTION_SPECIFIC_HEADERS = [
 ]
 
 
-def proxy_to_kobo_reading_services():
+def proxy_to_kobo_reading_services(custom_body=None):
     """
     Proxy the request to Kobo's reading services API.
+    
+    Args:
+        custom_body: Optional custom body data to send instead of request.get_data().
+                     If provided as dict/list, will be JSON-encoded.
     """
     try:
         kobo_url = KOBO_READING_SERVICES_URL + request.path
@@ -66,7 +70,14 @@ def proxy_to_kobo_reading_services():
         log.debug(f"Proxying {request.method} to Kobo Reading Services: {kobo_url}")
         
         # Get request body
-        request_body = request.get_data()
+        if custom_body is not None:
+            # If custom body provided, use it (JSON-encode if needed)
+            if isinstance(custom_body, (dict, list)):
+                request_body = json.dumps(custom_body).encode('utf-8')
+            else:
+                request_body = custom_body
+        else:
+            request_body = request.get_data()
         
         # Forward headers (including Authorization, x-kobo-userkey, etc.)
         outgoing_headers = Headers(request.headers)
@@ -213,9 +224,31 @@ def log_annotation_data(entitlement_id, method, data=None):
 # Helper functions for file management
 def get_annotation_attachment_dir(entitlement_id):
     """Get the directory path for storing annotation attachments"""
-    # Use user ID instead of auth token for directory structure
-    user_dir = str(current_user.id)
-    attachment_dir = os.path.join(config.config_calibre_dir, "kobo_annotations", user_dir, entitlement_id)
+    # Get auth token from the device making the request
+    device_id = request.headers.get('X-Kobo-Deviceid')
+    auth_token = None
+    
+    if device_id:
+        try:
+            # Look up device in database to get auth token
+            device = ub.session.query(ub.KoboDevice).filter(
+                ub.KoboDevice.device_id == device_id
+            ).first()
+            
+            if device:
+                auth_token = device.auth_token
+                log.debug(f"Using auth token from device {device_id}")
+        except Exception as e:
+            log.error(f"Error looking up device {device_id}: {e}")
+    
+    # Fallback to user ID if auth token not found
+    if not auth_token:
+        auth_token = str(current_user.id)
+        log.warning(f"No auth token found for device, using user ID as fallback")
+    
+    # Use the app database directory (where logs and databases are stored)
+    app_data_dir = os.path.dirname(ub.app_DB_path)
+    attachment_dir = os.path.join(app_data_dir, "kobo_annotations", auth_token, entitlement_id)
     os.makedirs(attachment_dir, exist_ok=True)
     return attachment_dir
 
@@ -499,10 +532,9 @@ def handle_check_for_changes():
         if not book:
             new_content_ids.append(item)
 
-    # Forward the request to Kobo with the new content IDs
+    # Forward the request to Kobo with the filtered content IDs
     if new_content_ids:
-        request.json = new_content_ids
-        return proxy_to_kobo_reading_services()
+        return proxy_to_kobo_reading_services(custom_body=new_content_ids)
     else:
         # Nothing new, just return 200 with empty json array []
         return make_response(jsonify([]), 200)

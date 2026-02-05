@@ -239,10 +239,12 @@ class Tags(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(collation='NOCASE'), unique=True, nullable=False)
+    link = Column(String, nullable=False, default="")
 
-    def __init__(self, name):
+    def __init__(self, name, link=""):
         super().__init__()
         self.name = name
+        self.link = link
 
     def get(self):
         return self.name
@@ -284,11 +286,13 @@ class Series(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(collation='NOCASE'), unique=True, nullable=False)
     sort = Column(String(collation='NOCASE'))
+    link = Column(String, nullable=False, default="")
 
-    def __init__(self, name, sort):
+    def __init__(self, name, sort, link=""):
         super().__init__()
         self.name = name
         self.sort = sort
+        self.link = link
 
     def get(self):
         return self.name
@@ -305,10 +309,12 @@ class Ratings(Base):
 
     id = Column(Integer, primary_key=True)
     rating = Column(Integer, CheckConstraint('rating>-1 AND rating<11'), unique=True)
+    link = Column(String, nullable=False, default="")
 
-    def __init__(self, rating):
+    def __init__(self, rating, link=""):
         super().__init__()
         self.rating = rating
+        self.link = link
 
     def get(self):
         return self.rating
@@ -325,10 +331,12 @@ class Languages(Base):
 
     id = Column(Integer, primary_key=True)
     lang_code = Column(String(collation='NOCASE'), nullable=False, unique=True)
+    link = Column(String, nullable=False, default="")
 
-    def __init__(self, lang_code):
+    def __init__(self, lang_code, link=""):
         super().__init__()
         self.lang_code = lang_code
+        self.link = link
 
     def get(self):
         if hasattr(self, "language_name"):
@@ -349,11 +357,13 @@ class Publishers(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(collation='NOCASE'), nullable=False, unique=True)
     sort = Column(String(collation='NOCASE'))
+    link = Column(String, nullable=False, default="")
 
-    def __init__(self, name, sort):
+    def __init__(self, name, sort, link=""):
         super().__init__()
         self.name = name
         self.sort = sort
+        self.link = link
 
     def get(self):
         return self.name
@@ -416,8 +426,6 @@ class Books(Base):
     path = Column(String, default="", nullable=False)
     has_cover = Column(Integer, default=0)
     uuid = Column(String)
-    isbn = Column(String(collation='NOCASE'), default="")
-    flags = Column(Integer, nullable=False, default=1)
 
     authors = relationship(Authors, secondary=books_authors_link, backref='books')
     tags = relationship(Tags, secondary=books_tags_link, backref='books', order_by="Tags.name")

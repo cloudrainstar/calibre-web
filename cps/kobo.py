@@ -115,6 +115,15 @@ kobo_auth.register_url_value_preprocessor(kobo)
 log = logger.create()
 
 
+# Keys that should be proxied from Kobo's init response when using native resources
+KOBO_PROXIED_INIT_KEYS = (
+    "feedback",
+    "kda_store_browser_redirect_url",
+    "love_data",
+    "subscription_publisher_price_page",
+)
+
+
 def get_store_url_for_current_request():
     # Programmatically modify the current url to point to the official Kobo store
     __, __, request_path_with_auth_token = request.full_path.rpartition("/kobo/")
@@ -1181,6 +1190,28 @@ def HandleAuthRequest():
     return make_calibre_web_auth_response()
 
 
+def fetch_proxied_init_keys_from_kobo(kobo_resources):
+    """
+    Fetch KOBO_PROXIED_INIT_KEYS from Kobo's init endpoint and merge into
+    kobo_resources. Used when serving native resources to populate keys
+    that may vary by region/firmware.
+    """
+    try:
+        store_response = make_request_to_kobo_store()
+        if store_response.status_code != 200:
+            return
+        store_response_json = store_response.json()
+        store_resources = store_response_json.get("Resources", {})
+        for key in KOBO_PROXIED_INIT_KEYS:
+            if key in store_resources:
+                value = store_resources[key]
+                # Pass through strings, dicts, or other JSON-serializable values
+                if value is not None:
+                    kobo_resources[key] = value
+    except Exception as ex:
+        log.debug("Could not fetch proxied init keys from Kobo: %s", ex)
+
+
 @kobo.route("/v1/initialization")
 @requires_kobo_auth
 def HandleInitRequest():
@@ -1200,6 +1231,7 @@ def HandleInitRequest():
             log.error("Failed to receive or parse response from Kobo's init endpoint. Falling back to un-proxied mode.")
     if not kobo_resources:
         kobo_resources = NATIVE_KOBO_RESOURCES()
+        fetch_proxied_init_keys_from_kobo(kobo_resources)
 
     if not current_app.wsgi_app.is_proxied:
         log.debug('Kobo: Received unproxied request, changed request port to external server port')
@@ -1339,6 +1371,7 @@ def NATIVE_KOBO_RESOURCES():
             "NL": "https://www.kobo.com/{region}/{language}/List/bekijk-het-overzicht-van-gratis-ebooks/QpkkVWnUw8sxmgjSlCbJRg",
             "PT": "https://www.kobo.com/{region}/{language}/p/livros-gratis"
         },
+        "feedback": "",
         "fte_feedback": "https://storeapi.kobo.com/v1/products/ftefeedback",
         "funnel_metrics": "https://storeapi.kobo.com/v1/funnelmetrics",
         "geography_data": "https://storeapi.kobo.com/v2/configuration/geography/country",
@@ -1356,6 +1389,7 @@ def NATIVE_KOBO_RESOURCES():
         "instapaper_enabled": "True",
         "instapaper_env_url": "https://www.instapaper.com/api/kobo",
         "instapaper_link_account_start": "https://authorize.kobo.com/{region}/{language}/linkinstapaper",
+        "kda_store_browser_redirect_url": "",
         "kobo_audiobooks_credit_redemption": "False",
         "kobo_audiobooks_enabled": "True",
         "kobo_audiobooks_orange_deal_enabled": "False",
@@ -1380,6 +1414,7 @@ def NATIVE_KOBO_RESOURCES():
         "library_search": "https://storeapi.kobo.com/v1/library/search",
         "library_sync": "https://storeapi.kobo.com/v1/library/sync",
         "love_dashboard_page": "https://www.kobo.com/{region}/{language}/kobosuperpoints",
+        "love_data": "",
         "love_points_redemption_page": "https://www.kobo.com/{region}/{language}/KoboSuperPointsRedemption?productId={ProductId}",
         "magazine_landing_page": "https://www.kobo.com/emagazines",
         "more_sign_in_options": "https://authorize.kobo.com/signin?returnUrl=https://kobo.com/#allProviders",
@@ -1441,6 +1476,7 @@ def NATIVE_KOBO_RESOURCES():
         "subs_management_page": "https://www.kobo.com/{region}/{language}/account/subscriptions",
         "subs_plans_page": "https://www.kobo.com/{region}/{language}/plus/plans",
         "subs_purchase_buy_templated": "https://www.kobo.com/{region}/{language}/Checkoutoption/{ProductId}/{TierId}",
+        "subscription_publisher_price_page": "",
         "tag_items": "https://storeapi.kobo.com/v1/library/tags/{TagId}/Items",
         "tags": "https://storeapi.kobo.com/v1/library/tags",
         "taste_profile": "https://storeapi.kobo.com/v1/products/tasteprofile",

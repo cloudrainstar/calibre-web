@@ -30,7 +30,6 @@ from flask import session as flask_session
 from flask_babel import gettext as _
 from flask_babel import get_locale
 from .cw_login import login_user, logout_user, current_user
-from flask_limiter import RateLimitExceeded
 from flask_limiter.util import get_remote_address
 from sqlalchemy.exc import IntegrityError, InvalidRequestError, OperationalError
 from sqlalchemy.sql.expression import text, func, false, not_, and_, or_
@@ -39,7 +38,7 @@ from sqlalchemy.sql.functions import coalesce
 from werkzeug.datastructures import Headers
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from . import constants, logger, isoLanguages, services
+from . import constants, logger, isoLanguages, services, limiter
 from . import db, ub, config, app
 from . import calibre_db, kobo_sync_status
 from .search import render_search_results, render_adv_search_results
@@ -55,7 +54,6 @@ from .usermanagement import login_required_if_no_ano
 from .kobo_sync_status import remove_synced_book
 from .render_template import render_title_template
 from .kobo_sync_status import change_archived_books
-from . import limiter
 from .services.worker import WorkerThread
 from .tasks_status import render_task_status
 from .usermanagement import user_login_required
@@ -303,7 +301,6 @@ def get_matching_tags():
     tag_dict = {'tags': []}
     q = calibre_db.session.query(db.Books).filter(calibre_db.common_filters(True))
     calibre_db.create_functions()
-    # calibre_db.session.connection().connection.connection.create_function("lower", 1, db.lcase)
     author_input = request.args.get('authors') or ''
     title_input = request.args.get('title') or ''
     include_tag_inputs = request.args.getlist('include_tag') or ''
@@ -812,13 +809,18 @@ def index(page):
     return render_books_list("newest", sort_param, 1, page)
 
 
-@web.route('/<data>/<sort_param>', defaults={'page': 1, 'book_id': 1})
-@web.route('/<data>/<sort_param>/', defaults={'page': 1, 'book_id': 1})
-@web.route('/<data>/<sort_param>/<book_id>', defaults={'page': 1})
-@web.route('/<data>/<sort_param>/<book_id>/<int:page>')
 @login_required_if_no_ano
 def books_list(data, sort_param, book_id, page):
     return render_books_list(data, sort_param, book_id, page)
+
+# Limit number of routes to avoid redirects
+data =["rated", "discover", "unread", "read", "hot", "download", "author", "publisher", "series", "ratings", "formats",
+       "category", "language", "archived", "search", "advsearch", "newest"]
+for d in data:
+    web.add_url_rule('/{}/<sort_param>'.format(d), view_func=books_list, defaults={'page': 1, 'book_id': 1, "data": d})
+    web.add_url_rule('/{}/<sort_param>/'.format(d), view_func=books_list, defaults={'page': 1, 'book_id': 1, "data": d})
+    web.add_url_rule('/{}/<sort_param>/<book_id>'.format(d), view_func=books_list, defaults={'page': 1, "data": d})
+    web.add_url_rule('/{}/<sort_param>/<book_id>/<int:page>'.format(d), defaults={"data": d}, view_func=books_list)
 
 
 @web.route("/table")
@@ -1023,7 +1025,7 @@ def series_list():
                             .count())
             if no_series_count:
                 entries.append([db.Category(_("None"), "-1"), no_series_count])
-            entries = sorted(entries, key=lambda x: x[0].name.lower(), reverse=not order_no)
+            entries = sorted(entries, key=lambda x: (x[0].sort or x[0].name).lower(), reverse=not order_no)
             return render_title_template('list.html',
                                          entries=entries,
                                          folder='web.books_list',
@@ -1280,15 +1282,6 @@ def register_post():
     if not config.config_public_reg:
         abort(404)
     to_save = request.form.to_dict()
-    try:
-        limiter.check()
-    except RateLimitExceeded:
-        flash(_(u"Please wait one minute to register next user"), category="error")
-        return render_title_template('register.html', config=config, title=_("Register"), page="register")
-    except (ConnectionError, Exception) as e:
-        log.error("Connection error to limiter backend: %s", e)
-        flash(_("Connection error to limiter backend, please contact your administrator"), category="error")
-        return render_title_template('register.html', config=config, title=_("Register"), page="register")
     if current_user is not None and current_user.is_authenticated:
         return redirect(url_for('web.index'))
     if not config.get_mail_server_configured():
@@ -1314,6 +1307,10 @@ def register_post():
         content.role = config.config_default_role
         content.locale = config.config_default_locale
         content.sidebar_view = config.config_default_show
+        content.allowed_tags = config.config_allowed_tags
+        content.denied_tags = config.config_denied_tags
+        content.allowed_column_value = config.config_allowed_column_value
+        content.denied_column_value = config.config_denied_column_value
         try:
             ub.session.add(content)
             ub.session.commit()
@@ -1349,7 +1346,7 @@ def register():
 def handle_login_user(user, remember, message, category):
     login_user(user, remember=remember)
     flash(message, category=category)
-    [limiter.limiter.storage.clear(k.key) for k in limiter.current_limits]
+    [limiter.limiter.clear(limit.limit, *limit.request_args) for limit in limiter.current_limits]
     return redirect(get_redirect_location(request.form.get('next', None), "web.index"))
 
 
@@ -1383,15 +1380,6 @@ def login():
 def login_post():
     form = request.form.to_dict()
     username = strip_whitespaces(form.get('username', "")).lower().replace("\n","").replace("\r","")
-    try:
-        limiter.check()
-    except RateLimitExceeded:
-        flash(_("Please wait one minute before next login"), category="error")
-        return render_login(username, form.get("password", ""))
-    except (ConnectionError, Exception) as e:
-        log.error("Connection error to limiter backend: %s", e)
-        flash(_("Connection error to limiter backend, please contact your administrator"), category="error")
-        return render_login(username, form.get("password", ""))
     if current_user is not None and current_user.is_authenticated:
         return redirect(url_for('web.index'))
     if config.config_login_type == constants.LOGIN_LDAP and not services.ldap:

@@ -1101,14 +1101,17 @@ def get_download_link(book_id, book_format, client):
             file_name = book.title
             if len(book.authors) > 0:
                 file_name = file_name + ' - ' + book.authors[0].name
+            original_name = file_name
+            file_name = get_valid_filename(file_name, replace_whitespace=False, force_unidecode=True)
             if client == "kindle":
-                file_name = get_valid_filename(file_name, replace_whitespace=False, force_unidecode=True)
+                quoted_file_name = file_name
             else:
-                file_name = quote(get_valid_filename(file_name, replace_whitespace=False))
+                native_name = get_valid_filename(original_name, replace_whitespace=False, force_unidecode=False)
+                quoted_file_name = quote(native_name)
             headers = Headers()
             headers["Content-Type"] = mimetypes.types_map.get('.' + book_format, "application/octet-stream")
             headers["Content-Disposition"] = ('attachment; filename="{}.{}"; filename*=UTF-8\'\'{}.{}').format(
-                file_name, book_format, file_name, book_format)
+                file_name, book_format, quoted_file_name, book_format)
             return do_download_file(book, book_format, client, data1, headers)
     else:
         log.error("Book id {} not found for downloading".format(book_id))

@@ -177,11 +177,24 @@ def adv_search_serie(q, include_series_inputs, exclude_series_inputs):
         q = q.filter(not_(db.Books.series.any(db.Series.id == serie)))
     return q
 
+
 def adv_search_shelf(q, include_shelf_inputs, exclude_shelf_inputs):
-    q = q.outerjoin(ub.BookShelf, db.Books.id == ub.BookShelf.book_id)\
-        .filter(or_(ub.BookShelf.shelf == None, ub.BookShelf.shelf.notin_(exclude_shelf_inputs)))
-    if len(include_shelf_inputs) > 0:
-        q = q.filter(ub.BookShelf.shelf.in_(include_shelf_inputs))
+    if len(include_shelf_inputs):
+        in_shelf = (
+            calibre_db.session.query(ub.BookShelf.id)
+            .filter(ub.BookShelf.book_id == db.Books.id)
+            .filter(ub.BookShelf.shelf.in_(include_shelf_inputs))
+            .exists()
+        )
+        q = q.filter(in_shelf)
+    if len(exclude_shelf_inputs):
+        ex_shelf = (
+            calibre_db.session.query(ub.BookShelf.id)
+            .filter(ub.BookShelf.book_id == db.Books.id)
+            .filter(ub.BookShelf.shelf.in_(exclude_shelf_inputs))
+            .exists()
+        )
+        q = q.filter(~ex_shelf)
     return q
 
 def extend_search_term(searchterm,
@@ -245,7 +258,6 @@ def render_adv_search_results(term, offset=None, order=None, limit=None):
 
     cc = calibre_db.get_cc_columns(config, filter_config_custom_read=True)
     calibre_db.create_functions()
-    # calibre_db.session.connection().connection.connection.create_function("lower", 1, db.lcase)
     query = calibre_db.generate_linked_query(config.config_read_column, db.Books)
     q = query.outerjoin(db.books_series_link, db.Books.id == db.books_series_link.c.book)\
         .outerjoin(db.Series)\
@@ -341,10 +353,12 @@ def render_adv_search_results(term, offset=None, order=None, limit=None):
         q = adv_search_ratings(q, rating_high, rating_low)
 
         if description:
+            pass
             q = q.filter(db.Books.comments.any(func.lower(db.Comments.text).ilike("%" + description + "%")))
 
         # search custom columns
         try:
+            pass
             q = adv_search_custom_columns(cc, term, q)
         except AttributeError as ex:
             log.debug_or_exception(ex)

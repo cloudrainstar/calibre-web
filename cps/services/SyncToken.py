@@ -46,6 +46,65 @@ def get_datetime_from_json(json_object, field_name):
         return datetime.min
 
 
+class SyncTokenPagination:
+    """In-progress cursor for a multi-request Kobo sync response."""
+
+    def __init__(
+        self,
+        snapshot_ts=datetime.min,
+        books_last_id=0,
+        books_max_last_modified=datetime.min,
+        books_max_last_created=datetime.min,
+        reading_state_last_id=0,
+        reading_state_max_last_modified=datetime.min,
+        archive_max_last_modified=datetime.min,
+    ):
+        self.snapshot_ts = snapshot_ts
+        self.books_last_id = books_last_id
+        self.books_max_last_modified = books_max_last_modified
+        self.books_max_last_created = books_max_last_created
+        self.reading_state_last_id = reading_state_last_id
+        self.reading_state_max_last_modified = reading_state_max_last_modified
+        self.archive_max_last_modified = archive_max_last_modified
+
+    def to_dict(self):
+        return {
+            "snapshot_ts": to_epoch_timestamp(self.snapshot_ts),
+            "books_last_id": self.books_last_id,
+            "books_max_last_modified": to_epoch_timestamp(self.books_max_last_modified),
+            "books_max_last_created": to_epoch_timestamp(self.books_max_last_created),
+            "reading_state_last_id": self.reading_state_last_id,
+            "reading_state_max_last_modified": to_epoch_timestamp(self.reading_state_max_last_modified),
+            "archive_max_last_modified": to_epoch_timestamp(self.archive_max_last_modified),
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        if not data:
+            return None
+        return cls(
+            snapshot_ts=get_datetime_from_json(data, "snapshot_ts"),
+            books_last_id=int(data.get("books_last_id", 0) or 0),
+            books_max_last_modified=get_datetime_from_json(data, "books_max_last_modified"),
+            books_max_last_created=get_datetime_from_json(data, "books_max_last_created"),
+            reading_state_last_id=int(data.get("reading_state_last_id", 0) or 0),
+            reading_state_max_last_modified=get_datetime_from_json(data, "reading_state_max_last_modified"),
+            archive_max_last_modified=get_datetime_from_json(data, "archive_max_last_modified"),
+        )
+
+    def __str__(self):
+        return ("snap={},books=(id>{},max_lm={},max_lc={}),"
+                "rstate=(id>{},max_lm={}),archive_max_lm={}").format(
+            self.snapshot_ts,
+            self.books_last_id,
+            self.books_max_last_modified,
+            self.books_max_last_created,
+            self.reading_state_last_id,
+            self.reading_state_max_last_modified,
+            self.archive_max_last_modified,
+        )
+
+
 class SyncToken:
     """ The SyncToken is used to persist state across requests.
     When serialized over the response headers, the Kobo device will propagate the token onto following
@@ -58,8 +117,9 @@ class SyncToken:
     """
 
     SYNC_TOKEN_HEADER = "x-kobo-synctoken"  # nosec
-    VERSION = "1-1-0"
+    VERSION = "1-2-0"
     LAST_MODIFIED_ADDED_VERSION = "1-1-0"
+    PAGINATION_ADDED_VERSION = "1-2-0"
     MIN_VERSION = "1-0-0"
 
     token_schema = {
@@ -77,7 +137,8 @@ class SyncToken:
             "books_last_created": {"type": "string"},
             "archive_last_modified": {"type": "string"},
             "reading_state_last_modified": {"type": "string"},
-            "tags_last_modified": {"type": "string"}
+            "tags_last_modified": {"type": "string"},
+            "pagination": {"type": ["object", "null"]},
             # "books_last_id": {"type": "integer", "optional": True}
         },
     }
@@ -89,7 +150,8 @@ class SyncToken:
         books_last_modified=datetime.min,
         archive_last_modified=datetime.min,
         reading_state_last_modified=datetime.min,
-        tags_last_modified=datetime.min
+        tags_last_modified=datetime.min,
+        pagination=None,
         # books_last_id=-1
     ):  # nosec
         self.raw_kobo_store_token = raw_kobo_store_token
@@ -98,6 +160,7 @@ class SyncToken:
         self.archive_last_modified = archive_last_modified
         self.reading_state_last_modified = reading_state_last_modified
         self.tags_last_modified = tags_last_modified
+        self.pagination = pagination
         # self.books_last_id = books_last_id
 
     @staticmethod
@@ -121,7 +184,7 @@ class SyncToken:
                 raise ValueError
 
             data_json = sync_token_json["data"]
-            validate(sync_token_json, SyncToken.data_schema_v1)
+            validate(data_json, SyncToken.data_schema_v1)
         except (exceptions.ValidationError, ValueError):
             log.error("Sync token contents do not follow the expected json schema.")
             return SyncToken()
@@ -133,7 +196,8 @@ class SyncToken:
             archive_last_modified = get_datetime_from_json(data_json, "archive_last_modified")
             reading_state_last_modified = get_datetime_from_json(data_json, "reading_state_last_modified")
             tags_last_modified = get_datetime_from_json(data_json, "tags_last_modified")
-        except TypeError:
+            pagination = SyncTokenPagination.from_dict(data_json.get("pagination"))
+        except (TypeError, ValueError):
             log.error("SyncToken timestamps don't parse to a datetime.")
             return SyncToken(raw_kobo_store_token=raw_kobo_store_token)
 
@@ -144,6 +208,7 @@ class SyncToken:
             archive_last_modified=archive_last_modified,
             reading_state_last_modified=reading_state_last_modified,
             tags_last_modified=tags_last_modified,
+            pagination=pagination,
         )
 
     def set_kobo_store_header(self, store_headers):
@@ -167,14 +232,16 @@ class SyncToken:
                 "archive_last_modified": to_epoch_timestamp(self.archive_last_modified),
                 "reading_state_last_modified": to_epoch_timestamp(self.reading_state_last_modified),
                 "tags_last_modified": to_epoch_timestamp(self.tags_last_modified),
+                "pagination": self.pagination.to_dict() if self.pagination is not None else None,
             },
         }
         return b64encode_json(token)
 
     def __str__(self):
-        return "{},{},{},{},{},{}".format(self.books_last_created,
-                                          self.books_last_modified,
-                                          self.archive_last_modified,
-                                          self.reading_state_last_modified,
-                                          self.tags_last_modified,
-                                          self.raw_kobo_store_token)
+        return "{},{},{},{},{},{},pagination={}".format(self.books_last_created,
+                                                        self.books_last_modified,
+                                                        self.archive_last_modified,
+                                                        self.reading_state_last_modified,
+                                                        self.tags_last_modified,
+                                                        self.raw_kobo_store_token,
+                                                        self.pagination)

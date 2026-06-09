@@ -391,7 +391,7 @@ def HandleSyncRequest():
         changed_reading_states = changed_reading_states.filter(
             ub.KoboReadingState.last_modified > sync_token.reading_state_last_modified)
 
-    changed_reading_states = (changed_reading_states.filter(
+    changed_reading_states = changed_reading_states.filter(
         and_(ub.KoboReadingState.user_id == current_user.id,
              ub.KoboReadingState.book_id.notin_(reading_states_in_new_entitlements)))\
         .order_by(ub.KoboReadingState.last_modified)

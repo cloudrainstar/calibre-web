@@ -133,11 +133,11 @@ class SyncToken:
         "type": "object",
         "properties": {
             "raw_kobo_store_token": {"type": "string"},
-            "books_last_modified": {"type": "string"},
-            "books_last_created": {"type": "string"},
-            "archive_last_modified": {"type": "string"},
-            "reading_state_last_modified": {"type": "string"},
-            "tags_last_modified": {"type": "string"},
+            "books_last_modified": {"type": "number"},
+            "books_last_created": {"type": "number"},
+            "archive_last_modified": {"type": "number"},
+            "reading_state_last_modified": {"type": "number"},
+            "tags_last_modified": {"type": "number"},
             "pagination": {"type": ["object", "null"]},
             # "books_last_id": {"type": "integer", "optional": True}
         },

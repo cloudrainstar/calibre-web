@@ -11,8 +11,31 @@ def load_sync_token_module():
     flask_stub.json = json
     sys.modules["flask"] = flask_stub
 
+    def validate_jsonschema_types(instance, schema):
+        for key, rules in schema.get("properties", {}).items():
+            if key not in instance or "type" not in rules:
+                continue
+            allowed_types = rules["type"]
+            if not isinstance(allowed_types, list):
+                allowed_types = [allowed_types]
+            if not any(matches_jsonschema_type(instance[key], allowed_type) for allowed_type in allowed_types):
+                raise ValueError("{} has invalid type".format(key))
+
+    def matches_jsonschema_type(value, allowed_type):
+        if allowed_type == "object":
+            return isinstance(value, dict)
+        if allowed_type == "string":
+            return isinstance(value, str)
+        if allowed_type == "number":
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if allowed_type == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if allowed_type == "null":
+            return value is None
+        return True
+
     jsonschema_stub = types.ModuleType("jsonschema")
-    jsonschema_stub.validate = lambda instance, schema: None
+    jsonschema_stub.validate = validate_jsonschema_types
     jsonschema_stub.exceptions = types.SimpleNamespace(ValidationError=ValueError)
     sys.modules["jsonschema"] = jsonschema_stub
 

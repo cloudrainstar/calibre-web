@@ -666,11 +666,9 @@ def HandleTagUpdate(tag_id):
     shelf = ub.session.query(ub.Shelf).filter(ub.Shelf.uuid == tag_id,
                                               ub.Shelf.user_id == current_user.id).one_or_none()
     if not shelf:
-        log.debug("Received Kobo tag update request on a collection unknown to CalibreWeb")
-        if config.config_kobo_proxy:
-            return redirect_or_proxy_request()
-        else:
-            abort(404, description="Collection isn't known to CalibreWeb")
+        log.debug("Received Kobo tag update for unknown collection %s — "
+                  "answering via redirect_or_proxy_request to terminate the device's retry loop", tag_id)
+        return redirect_or_proxy_request()
 
     if request.method == "DELETE":
         if not shelf_lib.delete_shelf_helper(shelf):
@@ -759,8 +757,9 @@ def HandleTagRemoveItem(tag_id):
                                               ub.Shelf.user_id == current_user.id).one_or_none()
     if not shelf:
         log.debug(
-            "Received a request to remove an item from a Collection unknown to CalibreWeb.")
-        abort(404, description="Collection isn't known to CalibreWeb")
+            "Received Kobo tag-remove-item for unknown collection %s — "
+            "answering via redirect_or_proxy_request to terminate the device's retry loop", tag_id)
+        return redirect_or_proxy_request()
 
     if not shelf_lib.check_shelf_edit_permissions(shelf):
         abort(401, description="User is unauthaurized to edit shelf.")
